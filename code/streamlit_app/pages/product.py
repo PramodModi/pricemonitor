@@ -1,5 +1,8 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import streamlit as st
-from streamlit_app.api_client import get_product
+from api_client import get_product
 
 
 st.title("📦 Product Details")

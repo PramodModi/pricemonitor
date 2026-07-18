@@ -1,6 +1,9 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import streamlit as st
-from streamlit_app.api_client import preview_product, confirm_subscription
-from streamlit_app.components.preview_card import render_preview_card
+from api_client import preview_product, confirm_subscription
+from components.preview_card import render_preview_card
 
 
 def init_session_state():

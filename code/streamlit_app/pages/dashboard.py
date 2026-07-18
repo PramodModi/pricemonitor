@@ -1,7 +1,10 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import streamlit as st
-from streamlit_app.api_client import get_items, delete_subscription
-from streamlit_app.components.product_card import render_product_card
-from streamlit_app.components.empty_state import render_empty_state
+from api_client import get_items, delete_subscription
+from components.product_card import render_product_card
+from components.empty_state import render_empty_state
 
 
 def init_session_state():

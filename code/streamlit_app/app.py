@@ -1,6 +1,10 @@
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(__file__))
+
 import streamlit as st
-from streamlit_app.api_client import get_health
+from api_client import get_health
 
 
 st.set_page_config(
