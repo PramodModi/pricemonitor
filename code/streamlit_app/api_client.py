@@ -1,7 +1,7 @@
 import requests
 from dataclasses import dataclass
 from typing import Optional
-from streamlit_app.config import settings
+from config import settings
 
 
 @dataclass
