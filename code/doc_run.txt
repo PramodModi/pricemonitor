@@ -1,0 +1,9 @@
+1. python3 -m venv .venv
+2. pip install -r requirements.txt
+3. playwright install chromium
+4. python -m tests.test_amazon_scraper
+
+To use Alembic:
+After pip install alembic.
+run on terminal : alembic init alembic
+Update alembic.ini
