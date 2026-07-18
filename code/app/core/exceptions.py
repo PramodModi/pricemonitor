@@ -28,3 +28,23 @@ class ScrapeBotDetectedError(ScrapeError):
 
 class ScrapeTimeoutError(ScrapeError):
     pass
+
+class PreviewNotFoundError(PriceWatchError):
+    """
+    Raised when a preview_id does not resolve to a cached ProductSnapshot.
+    Maps to HTTP 404 / PREVIEW_NOT_FOUND.
+    """
+    def __init__(self, preview_id: str) -> None:
+        self.preview_id = preview_id
+        super().__init__(f"Preview not found: {preview_id}")
+
+
+class SubscriptionNotFoundError(PriceWatchError):
+    """
+    Raised when a subscription_id does not exist or does not belong to the
+    requesting email. Maps to HTTP 404 / SUBSCRIPTION_NOT_FOUND.
+    Intentionally non-distinguishing — avoids leaking subscription existence.
+    """
+    def __init__(self, subscription_id: str) -> None:
+        self.subscription_id = subscription_id
+        super().__init__(f"Subscription not found: {subscription_id}")

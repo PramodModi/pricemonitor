@@ -1,6 +1,4 @@
 from decimal import Decimal
-from datetime import datetime, timezone
-
 from app.core.database import SessionLocal
 from app.repositories.user_repo import UserRepository
 from app.repositories.product_repo import ProductRepository
@@ -10,10 +8,15 @@ from app.repositories.scheduler_run_repo import SchedulerRunRepository
 
 def test_repositories():
     db = SessionLocal()
+    user = None
+    product = None
+    sub = None
+    run = None
+
     try:
         # 1 — User
         user_repo = UserRepository(db)
-        user, created = user_repo.get_or_create("test@example.com")
+        user, created = user_repo.get_or_create("test+repo@example.com")
         print(f"✅ User: {user.email} (created={created})")
 
         # 2 — Scheduler run
@@ -66,13 +69,31 @@ def test_repositories():
         print(f"✅ Price stats: {stats}")
 
         db.commit()
-        print("\n✅ All repository tests passed — data committed to Supabase")
+        print("\n✅ All repository tests passed")
 
     except Exception as e:
         db.rollback()
         print(f"❌ Test failed: {e}")
         raise
+
     finally:
-        db.close()
+        # Always clean up — runs whether test passed or failed
+        print("\n── Cleaning up test data ──────────────────────────────")
+        try:
+            if sub:
+                db.delete(sub)
+            if product:
+                db.delete(product)
+            if user:
+                db.delete(user)
+            if run:
+                db.delete(run)
+            db.commit()
+            print("✅ Test data cleaned up")
+        except Exception as e:
+            db.rollback()
+            print(f"❌ Cleanup failed: {e}")
+        finally:
+            db.close()
 
 test_repositories()
