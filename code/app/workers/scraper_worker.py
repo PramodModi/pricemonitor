@@ -239,9 +239,14 @@ class ScraperWorker:
             price_dropped = (
                 old_price is not None and new_price < old_price
             )
+            price_changed = (
+                old_price is not None and new_price != old_price
+            )
+
+            if price_changed:
+                product_repo.update_current_price(product, new_price)
 
             if price_dropped:
-                product_repo.update_current_price(product, new_price)
                 logger.info(
                     f"Price drop detected ,"
                     f"product_id={str(job.product_id)},"
