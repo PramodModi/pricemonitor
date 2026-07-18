@@ -7,3 +7,15 @@ To use Alembic:
 After pip install alembic.
 run on terminal : alembic init alembic
 Update alembic.ini
+
+Run Fastapi: python -m uvicorn app.fastapi.main:app --reload --port 8001
+Run streamlit: python -m streamlit run streamlit_app/app.py
+
+Deployment on Railway:
+Create new project and give Github repository pricemonitor link
+Select project> go to setting tab > source > root directory => select code
+In variables tab > Add .env variable key and value.
+Move down in setting, in build section> custom build command:
+    pip install -r requirements.txt && playwright install chromium && playwright install-deps chromium
+Go down in setting, in deploy section > custom start command:
+    uvicorn app.fastapi.main:app --host 0.0.0.0 --port $PORT
