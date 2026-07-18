@@ -48,3 +48,9 @@ class SubscriptionNotFoundError(PriceWatchError):
     def __init__(self, subscription_id: str) -> None:
         self.subscription_id = subscription_id
         super().__init__(f"Subscription not found: {subscription_id}")
+class DatabaseConnectionError(PriceWatchError):
+    """
+    Raised when the database is unreachable after exhausting retries.
+    Maps to HTTP 503 / SERVICE_UNAVAILABLE.
+    """
+    pass

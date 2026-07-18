@@ -72,10 +72,11 @@ class ProductSyncService:
         price_updated = False
 
         if product is None:
+            platform=live["platform"]
+            marketplace_product_id=live["marketplace_product_id"]
             logger.info(
-                "Creating new product",
-                platform=live["platform"],
-                marketplace_product_id=live["marketplace_product_id"],
+                f"Creating new product, platform={platform} "
+                f"marketplace_product_id={marketplace_product_id}"
             )
             product = self.product_repo.create(
                 url=live["url"],
@@ -101,8 +102,8 @@ class ProductSyncService:
 
         else:
             logger.info(
-                "Updating existing product metadata",
-                product_id=str(product.product_id),
+                f"Updating existing product metadata,"
+                f"product_id={str(product.product_id)}"
             )
             # Step 2a — refresh mutable metadata from the live scrape.
             self.product_repo.update_from_live_data(

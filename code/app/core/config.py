@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     dashboard_url: str = "https://pricewatch.app/dashboard"
     amazon_affiliate_tag: str = ""
     flipkart_affiliate_id: str = ""
+    secret_key: str = "pricemonitor"
 
     model_config = SettingsConfigDict(
         env_file=".env",

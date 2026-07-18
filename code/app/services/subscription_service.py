@@ -74,8 +74,8 @@ class SubscriptionService:
             product = self.product_repo.get_by_id(product_id)
             if product:
                 logger.info(
-                    "Deleting product — no subscribers remain",
-                    product_id=str(product_id),
+                    f"Deleting product — no subscribers remain,"
+                    f"product_id={str(product_id)}"
                 )
                 self.product_repo.delete(product)
                 product_deleted = True

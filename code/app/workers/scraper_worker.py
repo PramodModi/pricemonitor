@@ -86,7 +86,7 @@ class ScraperWorker:
         scrape_queue until a None sentinel is received.
         Playwright and browser are cleaned up in a finally block.
         """
-        logger.info("Worker starting", worker_id=self.worker_id)
+        logger.info(f"Worker starting, worker_id={self.worker_id}")
         with sync_playwright() as pw:
             self._browser = pw.chromium.launch(headless=True)
             try:

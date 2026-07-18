@@ -6,3 +6,7 @@ sqlalchemy
 alembic
 psycopg2-binary
 sendgrid
+fastapi
+uvicorn
+apscheduler
+email-validator
