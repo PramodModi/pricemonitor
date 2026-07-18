@@ -1,4 +1,16 @@
-steps:
+name: PriceMonitor Scraper
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"   # every 4 hours
+  workflow_dispatch:          # allow manual trigger from GitHub UI
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
