@@ -1,0 +1,17 @@
+PRICEMONITOR — PRICE DROP ALERT
+==============================
+
+{{product_name}} just dropped in price!
+
+OLD PRICE: {{old_price}}
+NEW PRICE: {{new_price}}
+SAVING:    {{drop_amount}} ({{drop_pct}}% off)
+
+Platform: {{platform_label}}
+
+View the product:
+{{product_url}}
+
+---
+You're receiving this because you're tracking this product on Pricemonitor.
+To stop tracking, visit your dashboard: {{dashboard_url}}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<body class="email-wrapper" style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+
+<table width="100%" bgcolor="#f3f4f6" cellpadding="0" cellspacing="0">
+<tr><td align="center" style="padding:24px 16px;">
+
+  <table width="600" style="max-width:600px;background:#ffffff;border-radius:8px;overflow:hidden;">
+
+    <!-- Block 1: Header -->
+    <tr><td bgcolor="#1a1a2e" style="padding:24px 32px;">
+      <span style="color:#ffffff;font-size:22px;font-weight:bold;letter-spacing:1px;">
+        👁️ PRICEWATCH
+      </span><br>
+      <span style="color:#a0a0c0;font-size:12px;text-transform:uppercase;letter-spacing:2px;">
+        Price Drop Alert
+      </span>
+    </td></tr>
+
+    <!-- Block 2: Price drop hero -->
+    <tr><td bgcolor="#ffffff" style="padding:32px 32px 16px 32px;">
+      <p style="color:#6b7280;font-size:15px;text-transform:uppercase;letter-spacing:2px;margin:0 0 12px;">
+        Price just dropped
+      </p>
+      {{major_drop_label}}
+      <p style="color:#9ca3af;font-size:18px;text-decoration:line-through;margin:0;">
+        {{old_price}}
+      </p>
+      <p style="color:#16a34a;font-size:36px;font-weight:bold;margin:4px 0;">
+        {{new_price}}
+      </p>
+      <span style="background:#dcfce7;color:#15803d;padding:4px 12px;border-radius:999px;font-size:13px;font-weight:bold;">
+        ▼ {{drop_amount}} off · {{drop_pct}}% drop
+      </span>
+    </td></tr>
+
+    <!-- Block 3: Product details -->
+    <tr><td bgcolor="#f9fafb" style="padding:24px 32px;border-top:1px solid #e5e7eb;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="120" valign="top">{{product_image}}</td>
+          <td style="padding-left:16px;" valign="top">
+            <p style="font-size:16px;font-weight:600;color:#111827;margin:0 0 8px;">
+              {{product_name}}
+            </p>
+            <span style="background:#e5e7eb;color:#374151;padding:3px 10px;border-radius:999px;font-size:12px;">
+              {{platform_icon}} {{platform_label}}
+            </span>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+
+    <!-- Block 4: Call to action -->
+    <tr><td bgcolor="#ffffff" style="padding:24px 32px;text-align:center;">
+      <a href="{{product_url}}"
+         style="background:#1d4ed8;color:#ffffff;padding:14px 32px;border-radius:6px;font-size:16px;font-weight:bold;text-decoration:none;display:inline-block;">
+        {{cta_text}}
+      </a>
+      <p style="font-size:12px;color:#6b7280;margin:12px 0 0;">
+        {{prices_disclaimer}}
+      </p>
+    </td></tr>
+
+    <!-- Block 5: Footer -->
+    <tr><td bgcolor="#f3f4f6" style="padding:24px 32px;border-top:1px solid #e5e7eb;text-align:center;">
+      <p style="font-size:12px;color:#6b7280;margin:0;">
+        {{footer_text}}<br><br>
+        {{footer_unsubscribe}}
+        <a href="{{dashboard_url}}" style="color:#4b5563;">dashboard</a>.
+      </p>
+    </td></tr>
+
+  </table>
+</td></tr>
+</table>
+
+</body>
+</html>
