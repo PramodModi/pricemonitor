@@ -18,6 +18,7 @@ from app.notifications.content.price_drop import (
     PRICES_DISCLAIMER,
     MAJOR_DROP_LABEL,
     MAJOR_DROP_THRESHOLD_PCT,
+    CONFIRMATION_SUBJECT,
 )
 from app.utils.logging import get_logger
 
