@@ -94,20 +94,25 @@ def preview_product(
                 context.close()
                 browser.close()
 
-    except ScrapeBotDetectedError:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "SCRAPE_BLOCKED",
-                "message": "The marketplace blocked our request. Please try again.",
-            },
-        )
-    except ScrapeError:
+    except ScrapeBotDetectedError as exc:
+        logger.error(f"Bot detected — url={validated.canonical_url}, error={str(exc)}")
+        raise HTTPException(...)
+    except ScrapeError as exc:
+        logger.error(f"Scrape failed — url={validated.canonical_url}, error={str(exc)}")
         raise HTTPException(
             status_code=502,
             detail={
                 "code": "SCRAPE_FAILED",
                 "message": "Could not extract product details. Please check the URL.",
+            },
+        )
+    except Exception as exc:
+        logger.error(f"Unexpected error — url={validated.canonical_url}, error={str(exc)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred.",
             },
         )
 
