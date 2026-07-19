@@ -1,6 +1,7 @@
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 import streamlit as st
 from api_client import get_product
 
@@ -43,7 +44,7 @@ with col_info:
     st.caption(f"{platform_label}  ·  {avail}")
 
     if p.get("current_price"):
-        st.markdown(f"### ₹{p['current_price']:,.0f}")
+        st.markdown(f"### ₹{float(p['current_price']):,.0f}")
 
     meta = []
     if p.get("rating"):
@@ -61,7 +62,7 @@ with col_info:
 
     st.link_button(
         f"View on {'Amazon India' if platform == 'amazon' else 'Flipkart'} →",
-        url=p["url"],
+        url=p["url"],  # URL already has affiliate tag from DB
         type="primary",
     )
 
@@ -71,8 +72,8 @@ if stats:
     st.divider()
     st.subheader("Price History")
     col1, col2, col3 = st.columns(3)
-    col1.metric("All-Time Low", f"₹{stats['all_time_low']:,.0f}")
-    col2.metric("All-Time High", f"₹{stats['all_time_high']:,.0f}")
+    col1.metric("All-Time Low", f"₹{float(stats['all_time_low']):,.0f}")
+    col2.metric("All-Time High", f"₹{float(stats['all_time_high']):,.0f}")
     col3.metric("Price Drops", stats["drop_count"])
     if stats.get("first_tracked_at"):
         st.caption(f"Tracked since {stats['first_tracked_at'][:10]}")
@@ -82,4 +83,5 @@ if p.get("watcher_count"):
 
 st.divider()
 if st.button("← Back to My Items"):
+    st.session_state.view_product_id = None
     st.switch_page("pages/dashboard.py")
