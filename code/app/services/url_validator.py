@@ -1,11 +1,12 @@
 import re
 from dataclasses import dataclass
+from typing import Optional
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from app.core.exceptions import InvalidURLError, UnsupportedPlatformError
 
 
-_AMAZON_STRIP_PARAMS = {"ref", "ref_", "tag", "linkCode", "th", "psc"}
+_AMAZON_STRIP_PARAMS = {"ref", "ref_", "tag", "linkCode", "th", "psc", "smid", "dib", "dib_tag", "crid", "qid", "sprefix", "sr", "keywords"}
 _FLIPKART_STRIP_PARAMS = {"affid", "affExtParam1", "affExtParam2", "otracker"}
 
 _AMAZON_PRODUCT_PATTERNS = [
@@ -69,13 +70,39 @@ class URLValidator:
                 marketplace_product_id="",
             )
 
-        marketplace_product_id = self._extract_product_id(platform, parsed.path, raw_url)
-        canonical_url = self._canonicalise(platform, parsed)
+        # Try normal pattern extraction first
+        try:
+            marketplace_product_id = self._extract_product_id(
+                platform, parsed.path, raw_url
+            )
+            
+            # For Amazon, always reconstruct a clean /dp/ URL
+            if platform == "amazon" and marketplace_product_id:
+                canonical_url = f"https://www.amazon.in/dp/{marketplace_product_id}"
+            else:
+                canonical_url = self._canonicalise(platform, parsed)
+            
+            return ValidatedURL(
+                platform=platform,
+                canonical_url=canonical_url,
+                marketplace_product_id=marketplace_product_id,
+            )
+        except InvalidURLError:
+            pass
 
-        return ValidatedURL(
-            platform=platform,
-            canonical_url=canonical_url,
-            marketplace_product_id=marketplace_product_id,
+        # If normal extraction failed, try to reconstruct a clean URL for Amazon
+        if platform == "amazon":
+            reconstructed = self._reconstruct_amazon_url(raw_url)
+            if reconstructed:
+                return ValidatedURL(
+                    platform=platform,
+                    canonical_url=reconstructed,  # use clean /dp/ URL
+                    marketplace_product_id=reconstructed.split("/dp/")[1].split("/")[0],
+                )
+
+        raise InvalidURLError(
+            raw_url,
+            f"URL path does not match a known {platform} product page pattern.",
         )
 
     def _extract_product_id(self, platform: str, path: str, raw_url: str) -> str:
@@ -106,6 +133,29 @@ class URLValidator:
             clean_query,
             "",
         ))
+    
+    def _reconstruct_amazon_url(self, raw_url: str) -> Optional[str]:
+        """
+        Try to extract ASIN from any Amazon URL and reconstruct a clean /dp/ URL.
+        Handles /gp/product/, /dp/, cart links, image links etc.
+        """
+        # Try all known ASIN patterns
+        asin_patterns = [
+            re.compile(r"/dp/([A-Z0-9]{10})"),
+            re.compile(r"/gp/product/([A-Z0-9]{10})"),
+            re.compile(r"/product/([A-Z0-9]{10})"),
+            re.compile(r"[&?]asin=([A-Z0-9]{10})"),
+            # ASIN as a standalone path segment
+            re.compile(r"/([A-Z0-9]{10})(?:[/?]|$)"),
+        ]
+
+        for pattern in asin_patterns:
+            match = pattern.search(raw_url)
+            if match:
+                asin = match.group(1)
+                return f"https://www.amazon.in/dp/{asin}"
+
+        return None
 
 
 url_validator = URLValidator()

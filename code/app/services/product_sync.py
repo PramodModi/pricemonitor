@@ -8,10 +8,21 @@ from app.repositories.product_repo import ProductRepository
 from app.repositories.subscription_repo import SubscriptionRepository
 from app.repositories.price_history_repo import PriceHistoryRepository
 from app.services.preview_cache import ProductSnapshot
+from app.core.config import settings as app_settings
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+
+def _build_affiliated_url(url: str, platform: str) -> str:
+    """Append affiliate tag to URL before storing in DB."""
+    if platform == "amazon" and app_settings.amazon_affiliate_tag:
+        separator = "&" if "?" in url else "?"
+        return f"{url}{separator}tag={app_settings.amazon_affiliate_tag}"
+    if platform == "flipkart" and app_settings.flipkart_affiliate_id:
+        separator = "&" if "?" in url else "?"
+        return f"{url}{separator}affid={app_settings.flipkart_affiliate_id}"
+    return url
 
 class SyncResult:
     def __init__(
@@ -78,8 +89,9 @@ class ProductSyncService:
                 f"Creating new product, platform={platform} "
                 f"marketplace_product_id={marketplace_product_id}"
             )
+            affiliated_url = _build_affiliated_url(live["url"], live["platform"])
             product = self.product_repo.create(
-                url=live["url"],
+                url=affiliated_url,
                 platform=live["platform"],
                 marketplace_product_id=live["marketplace_product_id"],
                 name=live.get("name"),
