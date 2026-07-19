@@ -96,11 +96,16 @@ def render_product_card(item: dict) -> None:
     html = html.replace("{price_block}", price_block)
     html = html.replace("{last_checked}", _format_last_checked(product.get("last_checked_at")))
 
-    col1, col2 = st.columns([10, 1])
+    col1, col2 = st.columns([8, 2])
     with col1:
         st.markdown(html, unsafe_allow_html=True)
     with col2:
-        if st.button("🗑️", key=f"remove_{subscription_id}", help="Remove"):
+        if st.button("🔍 View", key=f"view_{subscription_id}", use_container_width=True):
+            st.session_state.view_product_id = product.get("product_id")
+            st.session_state.navigate_to_product = True
+            st.rerun()
+            
+        if st.button("🗑️ Remove", key=f"remove_{subscription_id}", use_container_width=True):
             st.session_state.delete_confirm = {
                 "subscription_id": subscription_id,
                 "name": product.get("name", "this product"),
