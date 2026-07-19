@@ -13,6 +13,7 @@ from app.core.exceptions import (
     SubscriptionNotFoundError,
 )
 from app.utils.logging import get_logger
+from app.notifications.email_sender import EmailSender
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 logger = get_logger(__name__)
@@ -86,4 +87,33 @@ def unsubscribe(
         subscription_id=result.subscription_id,
         product_deleted=result.product_deleted,
         message=result.message,
+    )
+@router.post("", response_model=SubscriptionOut, status_code=status.HTTP_201_CREATED)
+def subscribe(body: SubscribeRequest, db: Session = Depends(get_db)) -> SubscriptionOut:
+    ...
+    sync_svc = ProductSyncService(db)
+    result = sync_svc.sync(snapshot, str(body.email))
+    db.commit()
+
+    # Send confirmation email
+    if result.is_new_subscription:
+        try:
+            sender = EmailSender()
+            sender.send_subscription_confirmation(
+                to_email=str(body.email),
+                product_name=result.product.name or "Product",
+                product_image_url=result.product.image_url,
+                product_url=result.product.url,
+                current_price=result.product.current_price,
+                platform=result.product.platform,
+            )
+        except Exception as exc:
+            logger.error(f"Confirmation email failed — error={str(exc)}")
+            # Don't fail the subscription if email fails
+
+    return SubscriptionOut(
+        subscription_id=result.subscription_id,
+        is_new_subscription=result.is_new_subscription,
+        re_scraped=re_scraped,
+        product=ProductOut.model_validate(result.product),
     )

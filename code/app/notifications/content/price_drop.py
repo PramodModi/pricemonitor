@@ -35,4 +35,12 @@ PRICES_DISCLAIMER = "Prices can change at any time."
 
 MAJOR_DROP_LABEL = "🔥 Major price drop!"
 
-MAJOR_DROP_THRESHOLD_PCT = 50
+MAJOR_DROP_THRESHOLD_PCT = 15
+
+# Confirmation email content
+CONFIRMATION_SUBJECT = "You're now tracking {product_name}"
+
+CONFIRMATION_BODY = (
+    "You've successfully subscribed to price alerts for {product_name}. "
+    "We'll notify you when the price changes."
+)

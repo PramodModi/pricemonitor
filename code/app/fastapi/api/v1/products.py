@@ -45,6 +45,7 @@ def preview_product(
     # Step 1 — validate URL
     try:
         validated = url_validator.validate(body.url)
+        logger.info(f"Validated URL — canonical={validated.canonical_url}, platform={validated.platform}, id={validated.marketplace_product_id}")
     except InvalidURLError as exc:
         raise HTTPException(
             status_code=400,
