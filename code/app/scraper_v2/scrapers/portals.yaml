@@ -85,6 +85,7 @@ portals:
     browser: firefox
     pre_extract_hook: patch_myntra_headless
     goto_wait_until: "domcontentloaded"
+    post_nav_wait_ms: 2000
     # Layers confirmed absent on Myntra (July 2025 dump analysis):
     # - meta_tags: no OG price meta tags served
     skip_layers:
