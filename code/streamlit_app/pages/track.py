@@ -154,7 +154,7 @@ elif st.session_state.track_step == "success":
             f"We'll email **{st.session_state.user_email}** "
             f"when the price changes."
         )
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             if st.button(
                 "View Product Details →",
@@ -164,6 +164,14 @@ elif st.session_state.track_step == "success":
                 st.session_state.track_step = "input"
                 st.switch_page("pages/product.py")
         with col2:
+            if st.button(
+                "➕ Track Another Item",
+                use_container_width=True,
+            ):
+                st.session_state.track_step = "input"
+                st.session_state.preview_result = None
+                st.rerun()
+        with col3:
             if st.button(
                 "← Back to Dashboard",
                 use_container_width=True,
