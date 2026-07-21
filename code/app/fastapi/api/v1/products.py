@@ -107,10 +107,10 @@ def preview_product(
                         },
                     )
                 else:
-                    # Amazon / Flipkart — original context, unchanged
+                    # Amazon / Flipkart — match run_test.py context exactly
                     context = browser.new_context(
-                        locale="en-IN",
                         viewport={"width": 1280, "height": 800},
+                        locale="en-IN",
                         timezone_id="Asia/Kolkata",
                         user_agent=(
                             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
