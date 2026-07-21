@@ -37,16 +37,31 @@ Response:
 import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, HttpUrl
+from fastapi import APIRouter, Depends, HTTPException, Security, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
 
-from app.fastapi.dependencies import verify_internal_token
+from app.core.config import settings
 from app.utils.logging import get_logger
+
+# Inline token verification — avoids fragile cross-package import path assumptions.
+# Uses the same SECRET_KEY as all other internal endpoints.
+_bearer_scheme = HTTPBearer()
+
+
+def _verify_token(
+    credentials: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+) -> None:
+    if credentials.credentials != settings.secret_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "Invalid token."},
+        )
 
 router = APIRouter(
     prefix="/internal",
     tags=["internal"],
-    dependencies=[Depends(verify_internal_token)],
+    dependencies=[Depends(_verify_token)],
 )
 logger = get_logger(__name__)
 
