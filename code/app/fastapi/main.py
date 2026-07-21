@@ -12,6 +12,7 @@ from app.services.preview_cache import preview_cache
 from app.workers.worker_manager import WorkerManager
 from app.workers.email_worker import EmailWorker
 from app.scheduler.run_manager import RunManager
+from app.fastapi.api.v1 import debug_scrape
 from app.utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(items.router, prefix=prefix)
     app.include_router(runs.router, prefix=prefix)
     app.include_router(internal.router, prefix=prefix)
+    app.include_router(debug_scrape.router, prefix=prefix)
 
     return app
 
