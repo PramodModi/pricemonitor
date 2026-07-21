@@ -316,11 +316,25 @@ class ScraperWorker:
                 context = self._browser.new_context(
                     viewport={"width": 1280, "height": 800},
                     locale="en-IN",
+                    timezone_id="Asia/Kolkata",
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
                         "Chrome/124.0.0.0 Safari/537.36"
                     ),
+                    extra_http_headers={
+                        "Accept-Language": "en-IN,en;q=0.9",
+                        "Accept": (
+                            "text/html,application/xhtml+xml,application/xml;"
+                            "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+                        ),
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "Upgrade-Insecure-Requests": "1",
+                        "Sec-Fetch-Dest": "document",
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Site": "none",
+                        "Sec-Fetch-User": "?1",
+                    },
                 )
                 page = context.new_page()
                 Stealth().apply_stealth_sync(page)
