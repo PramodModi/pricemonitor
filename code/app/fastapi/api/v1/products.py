@@ -88,11 +88,11 @@ def preview_product(
                             "--disable-http2",
                         ],
                     )
-                # Firefox portals (Myntra): do NOT override user_agent.
-                # Firefox has a distinct TLS fingerprint that bypasses bot
-                # detection. A Chrome UA on a Firefox TLS profile is a mismatch
-                # that bot detectors flag. Let Playwright use the real Firefox UA.
-                if portal_config.browser == "firefox":
+                if validated.platform == "myntra":
+                    # Myntra: Firefox browser, no UA override.
+                    # Firefox has a distinct TLS fingerprint that bypasses
+                    # Myntra's bot detection. A Chrome UA on a Firefox TLS
+                    # profile is a mismatch that gets flagged.
                     context = browser.new_context(
                         locale="en-IN",
                         viewport={"width": 1280, "height": 800},
@@ -107,6 +107,7 @@ def preview_product(
                         },
                     )
                 else:
+                    # Amazon / Flipkart — original context, unchanged
                     context = browser.new_context(
                         locale="en-IN",
                         viewport={"width": 1280, "height": 800},

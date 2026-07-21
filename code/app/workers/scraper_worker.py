@@ -217,11 +217,11 @@ class ScraperWorker:
                     firefox_browser = self._pw.firefox.launch(headless=True)
                     browser_to_use = firefox_browser
 
-                # Firefox portals (Myntra): do NOT override user_agent — Firefox
-                # has a distinct TLS fingerprint that bypasses bot detection.
-                # Sending a Chrome UA with a Firefox TLS profile is a mismatch
-                # that bot detectors flag. Let Playwright use the real Firefox UA.
-                if portal_config.browser == "firefox":
+                if job.platform == "myntra":
+                    # Myntra: Firefox browser, no UA override.
+                    # Firefox has a distinct TLS fingerprint that bypasses
+                    # Myntra's bot detection. A Chrome UA on a Firefox TLS
+                    # profile is a mismatch that gets flagged.
                     context = browser_to_use.new_context(
                         viewport={"width": 1280, "height": 800},
                         locale="en-IN",
@@ -236,6 +236,7 @@ class ScraperWorker:
                         },
                     )
                 else:
+                    # Amazon / Flipkart — original context, unchanged
                     context = browser_to_use.new_context(
                         viewport={"width": 1280, "height": 800},
                         locale="en-IN",
