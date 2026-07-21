@@ -17,6 +17,9 @@ _FLIPKART_PRODUCT_PATTERNS = [
     re.compile(r"/p/([a-zA-Z0-9]+)"),
     re.compile(r"/dl/[^/]+/[^/]+/p/([a-zA-Z0-9]+)"),
 ]
+_MYNTRA_PRODUCT_PATTERNS = [
+    re.compile(r"/([0-9]+)/buy"),
+]
 
 SUPPORTED_DOMAINS = {
     "amazon.in": "amazon",
@@ -24,12 +27,13 @@ SUPPORTED_DOMAINS = {
     "amzn.in": "amazon",
     "flipkart.com": "flipkart",
     "www.flipkart.com": "flipkart",
+    "myntra.com": "myntra",
+    "www.myntra.com": "myntra",
 }
 
 _KNOWN_UNSUPPORTED_DOMAINS = {
     "croma.com", "www.croma.com",
     "reliancedigital.in", "www.reliancedigital.in",
-    "myntra.com", "www.myntra.com",
     "apple.com", "www.apple.com",
     "samsung.com", "www.samsung.com",
 }
@@ -106,9 +110,12 @@ class URLValidator:
         )
 
     def _extract_product_id(self, platform: str, path: str, raw_url: str) -> str:
-        patterns = (
-            _AMAZON_PRODUCT_PATTERNS if platform == "amazon" else _FLIPKART_PRODUCT_PATTERNS
-        )
+        if platform == "amazon":
+            patterns = _AMAZON_PRODUCT_PATTERNS
+        elif platform == "flipkart":
+            patterns = _FLIPKART_PRODUCT_PATTERNS
+        else:
+            patterns = _MYNTRA_PRODUCT_PATTERNS
         for pattern in patterns:
             match = pattern.search(path)
             if match:

@@ -56,8 +56,13 @@ def render_preview_card(preview: dict) -> None:
 
     # Platform
     platform = live.get("platform", "amazon")
-    platform_label = "Amazon India" if platform == "amazon" else "Flipkart"
-    platform_icon = "🛒" if platform == "amazon" else "🛍️"
+    
+    PLATFORM_DISPLAY = {
+        "amazon": ("Amazon India", "🛒"),
+        "flipkart": ("Flipkart", "🛍️"),
+        "myntra": ("Myntra", "👗"),
+    }
+    platform_label, platform_icon = PLATFORM_DISPLAY.get(platform, (platform.title(), "🛒"))
 
     # Availability
     availability = live.get("availability")

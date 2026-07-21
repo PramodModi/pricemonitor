@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     amazon_affiliate_tag: str = ""
     flipkart_affiliate_id: str = ""
     secret_key: str = "pricemonitor"
+    use_scraper_v2: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

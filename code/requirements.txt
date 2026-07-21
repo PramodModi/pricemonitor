@@ -11,3 +11,4 @@ uvicorn
 apscheduler
 email-validator
 requests
+pyyaml

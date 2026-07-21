@@ -71,14 +71,14 @@ st.title("➕ Track New Item")
 # ── STATE: input ──────────────────────────────────────────────────────────────
 if st.session_state.track_step == "input":
     st.write(
-        "Paste a product URL from Amazon India or Flipkart and we'll "
+        "Paste a product URL from Amazon India or Flipkart or Myntra and we'll "
         "show you the details before you start tracking."
     )
 
     with st.form("url_form", border=True):
         url = st.text_input(
             "Product URL",
-            placeholder="https://www.amazon.in/... or https://www.flipkart.com/...",
+            placeholder="Enter product url... ",
         )
         submitted = st.form_submit_button(
             "Fetch Product Details",
@@ -86,7 +86,7 @@ if st.session_state.track_step == "input":
             use_container_width=True,
         )
 
-    st.caption("✅ Supported: Amazon India (amazon.in) · Flipkart (flipkart.com)")
+    st.caption("✅ Supported: Amazon India·Flipkart . Myntra")
 
     if submitted:
         if not url.strip():

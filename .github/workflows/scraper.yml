@@ -37,6 +37,8 @@ jobs:
         run: |
           playwright install chromium
           playwright install-deps chromium
+          playwright install firefox
+          playwright install-deps firefox
 
       - name: Run scraper
         working-directory: code

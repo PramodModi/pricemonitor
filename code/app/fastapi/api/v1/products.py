@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.fastapi.schemas.product import (
     PreviewRequest, PreviewResponse, ProductOut,
@@ -17,6 +18,10 @@ from app.core.exceptions import (
     ScrapeBotDetectedError,
     ScrapeError,
 )
+
+from app.scraper_v2.scrapers.generic_scraper import GenericScraper
+from app.scraper_v2.scrapers.registry import get_config
+
 from app.scrapers.amazon import AmazonScraper
 from app.scrapers.flipkart import FlipkartScraper
 from app.utils.logging import get_logger
@@ -26,6 +31,7 @@ logger = get_logger(__name__)
 
 _amazon_scraper = AmazonScraper()
 _flipkart_scraper = FlipkartScraper()
+_scraper_v2 = GenericScraper()
 
 
 @router.post(
@@ -65,38 +71,95 @@ def preview_product(
         )
 
     # Step 2 — live scrape
-    scraper = (
-        _amazon_scraper
-        if validated.platform == "amazon"
-        else _flipkart_scraper
-    )
-
     try:
         from playwright.sync_api import sync_playwright
         from playwright_stealth import Stealth
 
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(
-                locale="en-IN",
-                viewport={"width": 1280, "height": 800},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-            )
-            page = context.new_page()
-            Stealth().apply_stealth_sync(page)
-            try:
-                result = scraper.extract(page, validated.canonical_url)
-            finally:
-                context.close()
-                browser.close()
+        if settings.use_scraper_v2:
+            portal_config = get_config(validated.platform)
+            with sync_playwright() as pw:
+                if portal_config.browser == "firefox":
+                    browser = pw.firefox.launch(headless=True)
+                else:
+                    browser = pw.chromium.launch(
+                        headless=True,
+                        args=[
+                            "--disable-blink-features=AutomationControlled",
+                            "--disable-http2",
+                        ],
+                    )
+                context = browser.new_context(
+                    locale="en-IN",
+                    viewport={"width": 1280, "height": 800},
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                )
+                page = context.new_page()
+                Stealth().apply_stealth_sync(page)
+                try:
+                    result = _scraper_v2.scrape(
+                        page=page,
+                        url=validated.canonical_url,
+                        config=portal_config,
+                    )
+                finally:
+                    context.close()
+                    browser.close()
 
+            if not result.success:
+                logger.error(
+                    f"Scrape failed — url={validated.canonical_url} "
+                    f"error_type={result.error_type} "
+                    f"error={result.error_message}"
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "code": "SCRAPE_FAILED",
+                        "message": "Could not extract product details. Please check the URL.",
+                    },
+                )
+
+        else:
+            # v1 path — original code untouched
+            scraper = (
+                _amazon_scraper
+                if validated.platform == "amazon"
+                else _flipkart_scraper
+            )
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=True)
+                context = browser.new_context(
+                    locale="en-IN",
+                    viewport={"width": 1280, "height": 800},
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                )
+                page = context.new_page()
+                Stealth().apply_stealth_sync(page)
+                try:
+                    result = scraper.extract(page, validated.canonical_url)
+                finally:
+                    context.close()
+                    browser.close()
+
+    except HTTPException:
+        raise  # re-raise scrape_failed from v2 path
     except ScrapeBotDetectedError as exc:
         logger.error(f"Bot detected — url={validated.canonical_url}, error={str(exc)}")
-        raise HTTPException(...)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "BOT_DETECTED",
+                "message": "Could not extract product details. Please check the URL.",
+            },
+        )
     except ScrapeError as exc:
         logger.error(f"Scrape failed — url={validated.canonical_url}, error={str(exc)}")
         raise HTTPException(
@@ -111,11 +174,10 @@ def preview_product(
         raise HTTPException(
             status_code=500,
             detail={
-                "code": "INTERNAL_ERROR",
-                "message": "An unexpected error occurred.",
+                "code": "UNKNOWN_ERROR",
+                "message": "Something went wrong.",
             },
         )
-
     # Step 3 — assemble live_data
     marketplace_product_id = (
         result.marketplace_product_id or validated.marketplace_product_id
