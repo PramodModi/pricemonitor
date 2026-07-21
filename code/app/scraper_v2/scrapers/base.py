@@ -114,12 +114,12 @@ class BaseScraper:
             for match in pattern.finditer(raw_html):
                 try:
                     data = json.loads(match.group(1))
+                    price, product = self._dig_jsonld_product(data)
+                    if price is not None:
+                        self._jsonld_cache = product
+                        return price
                 except (json.JSONDecodeError, Exception):
                     continue
-                price, product = self._dig_jsonld_product(data)
-                if price is not None:
-                    self._jsonld_cache = product
-                    return price
         except Exception:
             pass
         return None
