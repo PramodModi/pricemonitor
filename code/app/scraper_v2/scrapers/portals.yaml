@@ -1,0 +1,108 @@
+portals:
+
+  amazon:
+    domains:
+      - amazon.in
+      - amzn.in
+    product_id_pattern: "/dp/([A-Z0-9]{10})"
+    affiliate_api: true        # Layer 6 — implement when PA-API access received
+    pre_extract_hook: simulate_amazon_human_behaviour
+    # Layers confirmed absent on Amazon.in (July 2025 dump analysis):
+    # - meta_tags: no OG/product meta tags served
+    # - json_ld:   0 ld+json script blocks
+    # - semantic:  no itemprop/data-testid price elements
+    skip_layers:
+      - meta_tags
+      - json_ld
+      - semantic
+    title_selector: "#productTitle"
+    brand_selector: "#bylineInfo"
+    image_selector: "#landingImage"
+    seller_selector: "#sellerProfileTriggerId"
+    price_selectors:
+      # Confirmed working (2025): corePrice block — includes ₹ symbol
+      - "#corePrice_feature_div .a-offscreen"
+      - "#corePrice_feature_div span.a-price-whole"
+      # 2024–present: apex pricing block
+      - ".apexPriceToPay span.a-offscreen"
+      - ".apexPriceToPay span.a-price-whole"
+      # 2022–2024: priceToPay block
+      - ".priceToPay span.a-offscreen"
+      - ".priceToPay span.a-price-whole"
+      # Classic a-price block
+      - ".a-price .a-offscreen"
+      - "span.a-price-whole"
+      # Legacy IDs (electronics, some book/media pages)
+      - "#priceblock_ourprice"
+      - "#priceblock_dealprice"
+      # Deal / sale price — includes currency symbol
+      - "span[data-a-color='price'] .a-offscreen"
+      # Renewed / warehouse deals
+      - "#usedBuySection .a-price .a-offscreen"
+
+  flipkart:
+    domains:
+      - flipkart.com
+    product_id_pattern: "/p/([a-zA-Z0-9]+)"
+    affiliate_api: false
+    pre_extract_hook: dismiss_flipkart_login
+    # Layers confirmed absent on Flipkart (July 2025 dump analysis):
+    # - meta_tags: no OG price meta tags served
+    skip_layers:
+      - meta_tags
+    # Flipkart's CSS classes are obfuscated and rotate frequently.
+    # Primary extraction relies on JSON-LD (Layer 2) and OG meta (Layer 1).
+    # CSS selectors below are best-effort fallbacks — expect them to drift.
+    # Confirmed working: July 2025 dump analysis.
+    title_selector: null
+    brand_selector: null
+    image_selector: null
+    seller_selector: null
+    price_selectors:
+      # Confirmed working (July 2025): product price block
+      # First two classes are stable across variants; 3rd/4th are shared base classes
+      - "div.v1zwn21l.v1zwn20"
+      - "div[class*='v1zwn21l'][class*='v1zwn20']"
+      # Partial stable class matches — survives minor rotations
+      - "div[class*='v1zwn21l'][class*='_1psv1ze0']"
+      # Legacy class names — kept as last CSS resort
+      - "div[class*='Nx9bqj']"
+      - "div[class*='CxhGGd']"
+      - "div._30jeq3._16Jk6d"
+      - "div._30jeq3"
+
+  # ── Add new portals below — no Python changes needed ─────────────────────
+  #
+  myntra:
+    domains:
+      - myntra.com
+    product_id_pattern: "/([0-9]+)/buy"
+    affiliate_api: false
+    # Myntra blocks headless Chromium via TLS fingerprinting.
+    # Firefox headless bypasses this — confirmed working July 2025.
+    browser: firefox
+    pre_extract_hook: patch_myntra_headless
+    goto_wait_until: "domcontentloaded"
+    # Layers confirmed absent on Myntra (July 2025 dump analysis):
+    # - meta_tags: no OG price meta tags served
+    skip_layers:
+      - meta_tags
+    # Primary extraction via JSON-LD (Layer 2) — confirmed type=Product with
+    # price=1408, name, brand, rating. July 2025.
+    title_selector: null
+    brand_selector: null
+    image_selector: null
+    seller_selector: null
+    price_selectors:
+      - "span.pdp-price strong"
+      - "span.pdp-discount-container span.pdp-price"
+      - ".pdp-price"
+  #
+  # croma:
+  #   domains:
+  #     - croma.com
+  #   product_id_pattern: "/p/([0-9]+)"
+  #   affiliate_api: false
+  #   pre_extract_hook: null
+  #   price_selectors:
+  #     - "span.amount"

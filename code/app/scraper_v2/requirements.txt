@@ -1,0 +1,11 @@
+# scraper_v2 requirements
+# Minimal — only what the scraper itself needs.
+# PriceMonitor's requirements.txt already includes these when embedded.
+ 
+playwright==1.44.0
+playwright-stealth==2.0.3
+pyyaml>=6.0
+sqlalchemy>=2.0
+psycopg2-binary>=2.9
+python-dotenv>=1.0
+curl_cffi --break-system-packages
