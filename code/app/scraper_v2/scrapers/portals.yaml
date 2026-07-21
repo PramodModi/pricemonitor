@@ -45,6 +45,8 @@ portals:
       - flipkart.com
     product_id_pattern: "/p/([a-zA-Z0-9]+)"
     affiliate_api: false
+    goto_wait_until: domcontentloaded
+    post_nav_wait_ms: 2000    # wait for React hydration before extraction
     pre_extract_hook: dismiss_flipkart_login
     # Layers confirmed absent on Flipkart (July 2025 dump analysis):
     # - meta_tags: no OG price meta tags served

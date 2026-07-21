@@ -50,6 +50,7 @@ class PortalConfig:
     # Layers to skip entirely for this portal — confirmed absent via dump analysis.
     # Skipping saves time otherwise spent on timeouts and empty results.
     skip_layers: list = field(default_factory=list)
+    post_nav_wait_ms: int = 0
 
     # Compiled once at load time — not stored in yaml
     _id_pattern: re.Pattern = field(init=False, repr=False, compare=False)
@@ -108,6 +109,7 @@ def load_portal_configs(yaml_path: Path = _YAML_PATH) -> dict[str, PortalConfig]
             goto_wait_until=data.get("goto_wait_until", "domcontentloaded"),
             browser=data.get("browser", "chromium"),
             skip_layers=data.get("skip_layers", []),
+            post_nav_wait_ms=data.get("post_nav_wait_ms", 0),
         )
         logger.info(
             f"[CONFIG] Loaded portal — name={name} "

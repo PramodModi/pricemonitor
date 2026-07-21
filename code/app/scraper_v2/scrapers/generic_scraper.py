@@ -119,6 +119,8 @@ class GenericScraper(BaseScraper):
                 wait_until=config.goto_wait_until,
             )
             nav_ms = int((time.monotonic() - t_nav) * 1000)
+            if config.post_nav_wait_ms > 0:
+                page.wait_for_timeout(config.post_nav_wait_ms)
             logger.info(
                 f"[NAV] portal={config.name} nav_ms={nav_ms} url={url}"
             )
