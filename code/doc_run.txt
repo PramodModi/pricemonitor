@@ -19,3 +19,7 @@ Move down in setting, in build section> custom build command:
     pip install -r requirements.txt && playwright install chromium && playwright install-deps chromium
 Go down in setting, in deploy section > custom start command:
     uvicorn app.fastapi.main:app --host 0.0.0.0 --port $PORT
+
+Install:
+playwright install firefox => Myntra
+playwright install chromium => for chrom (Amazon, Flipkart)
