@@ -106,22 +106,36 @@ class BaseScraper:
         try:
             import re as _re
             raw_html = page.content()
+            logger.info(f"[JSON-LD] raw_html length={len(raw_html)}")
+
             # Extract all application/ld+json blocks from raw HTML source
             pattern = _re.compile(
                 r'<script[^>]+type=[^>]*application/ld[^>]*>(.*?)</script>',
                 _re.DOTALL | _re.IGNORECASE,
             )
-            for match in pattern.finditer(raw_html):
+            matches = list(pattern.finditer(raw_html))
+            logger.info(f"[JSON-LD] blocks_found={len(matches)}")
+
+            for i, match in enumerate(matches):
                 try:
-                    data = json.loads(match.group(1))
+                    raw_block = match.group(1)
+                    logger.info(f"[JSON-LD] block={i} raw_preview={raw_block[:200].strip()!r}")
+                    data = json.loads(raw_block)
+                    block_type = data.get("@type", "unknown") if isinstance(data, dict) else type(data).__name__
+                    logger.info(f"[JSON-LD] block={i} type={block_type!r}")
                     price, product = self._dig_jsonld_product(data)
+                    logger.info(f"[JSON-LD] block={i} price={price} product_keys={list(product.keys()) if product else []}")
                     if price is not None:
                         self._jsonld_cache = product
+                        logger.info(f"[JSON-LD] hit on block={i} price={price}")
                         return price
-                except (json.JSONDecodeError, Exception):
+                except Exception as exc:
+                    logger.info(f"[JSON-LD] block={i} exception={type(exc).__name__}: {exc}")
                     continue
-        except Exception:
-            pass
+
+            logger.info(f"[JSON-LD] no price found across {len(matches)} blocks")
+        except Exception as exc:
+            logger.info(f"[JSON-LD] outer exception={type(exc).__name__}: {exc}")
         return None
 
     def _dig_jsonld_product(

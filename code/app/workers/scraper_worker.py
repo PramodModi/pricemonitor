@@ -217,15 +217,34 @@ class ScraperWorker:
                     firefox_browser = self._pw.firefox.launch(headless=True)
                     browser_to_use = firefox_browser
 
-                context = browser_to_use.new_context(
-                    viewport={"width": 1280, "height": 800},
-                    locale="en-IN",
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                )
+                # Firefox portals (Myntra): do NOT override user_agent — Firefox
+                # has a distinct TLS fingerprint that bypasses bot detection.
+                # Sending a Chrome UA with a Firefox TLS profile is a mismatch
+                # that bot detectors flag. Let Playwright use the real Firefox UA.
+                if portal_config.browser == "firefox":
+                    context = browser_to_use.new_context(
+                        viewport={"width": 1280, "height": 800},
+                        locale="en-IN",
+                        extra_http_headers={
+                            "Accept-Language": "en-IN,en;q=0.9",
+                            "Accept": (
+                                "text/html,application/xhtml+xml,application/xml;"
+                                "q=0.9,image/avif,image/webp,*/*;q=0.8"
+                            ),
+                            "Accept-Encoding": "gzip, deflate, br",
+                            "Upgrade-Insecure-Requests": "1",
+                        },
+                    )
+                else:
+                    context = browser_to_use.new_context(
+                        viewport={"width": 1280, "height": 800},
+                        locale="en-IN",
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0.0.0 Safari/537.36"
+                        ),
+                    )
                 page = context.new_page()
                 Stealth().apply_stealth_sync(page)
 

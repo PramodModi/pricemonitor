@@ -88,29 +88,48 @@ def preview_product(
                             "--disable-http2",
                         ],
                     )
-                context = browser.new_context(
-                    locale="en-IN",
-                    viewport={"width": 1280, "height": 800},
-                    timezone_id="Asia/Kolkata",
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    extra_http_headers={
-                        "Accept-Language": "en-IN,en;q=0.9",
-                        "Accept": (
-                            "text/html,application/xhtml+xml,application/xml;"
-                            "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+                # Firefox portals (Myntra): do NOT override user_agent.
+                # Firefox has a distinct TLS fingerprint that bypasses bot
+                # detection. A Chrome UA on a Firefox TLS profile is a mismatch
+                # that bot detectors flag. Let Playwright use the real Firefox UA.
+                if portal_config.browser == "firefox":
+                    context = browser.new_context(
+                        locale="en-IN",
+                        viewport={"width": 1280, "height": 800},
+                        extra_http_headers={
+                            "Accept-Language": "en-IN,en;q=0.9",
+                            "Accept": (
+                                "text/html,application/xhtml+xml,application/xml;"
+                                "q=0.9,image/avif,image/webp,*/*;q=0.8"
+                            ),
+                            "Accept-Encoding": "gzip, deflate, br",
+                            "Upgrade-Insecure-Requests": "1",
+                        },
+                    )
+                else:
+                    context = browser.new_context(
+                        locale="en-IN",
+                        viewport={"width": 1280, "height": 800},
+                        timezone_id="Asia/Kolkata",
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0.0.0 Safari/537.36"
                         ),
-                        "Accept-Encoding": "gzip, deflate, br",
-                        "Upgrade-Insecure-Requests": "1",
-                        "Sec-Fetch-Dest": "document",
-                        "Sec-Fetch-Mode": "navigate",
-                        "Sec-Fetch-Site": "none",
-                        "Sec-Fetch-User": "?1",
-                    },
-                )
+                        extra_http_headers={
+                            "Accept-Language": "en-IN,en;q=0.9",
+                            "Accept": (
+                                "text/html,application/xhtml+xml,application/xml;"
+                                "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+                            ),
+                            "Accept-Encoding": "gzip, deflate, br",
+                            "Upgrade-Insecure-Requests": "1",
+                            "Sec-Fetch-Dest": "document",
+                            "Sec-Fetch-Mode": "navigate",
+                            "Sec-Fetch-Site": "none",
+                            "Sec-Fetch-User": "?1",
+                        },
+                    )
                 page = context.new_page()
                 Stealth().apply_stealth_sync(page)
                 try:
