@@ -119,6 +119,33 @@ class GenericScraper(BaseScraper):
                 wait_until=config.goto_wait_until,
             )
             nav_ms = int((time.monotonic() - t_nav) * 1000)
+
+            # ── WAF challenge handling (Amazon on Railway datacenter IPs) ──────
+            # AWS WAF serves a JS challenge page before the real product page.
+            # The challenge JS runs, gets a token, then does window.location.reload().
+            # page.goto() returns on the challenge page (domcontentloaded fires there).
+            # We detect the challenge and wait for the reload to complete.
+            if config.name == "amazon":
+                try:
+                    page_content = page.content()
+                    if "awswaf" in page_content or "AwsWafIntegration" in page_content:
+                        logger.info(
+                            f"[NAV] portal={config.name} — AWS WAF challenge detected, "
+                            f"waiting for reload — url={url}"
+                        )
+                        # Wait for the WAF JS to complete and reload to product page.
+                        # wait_for_url waits until page URL matches or timeout.
+                        # Since URL stays the same after reload, we wait for the
+                        # page to no longer contain WAF challenge content.
+                        page.wait_for_load_state("load", timeout=settings.page_goto_timeout_ms)
+                        page.wait_for_timeout(3000)
+                        nav_ms = int((time.monotonic() - t_nav) * 1000)
+                        logger.info(
+                            f"[NAV] portal={config.name} — post-WAF nav_ms={nav_ms}"
+                        )
+                except Exception as waf_exc:
+                    logger.debug(f"[NAV] WAF check error — {waf_exc}")
+
             if config.post_nav_wait_ms > 0:
                 page.wait_for_timeout(config.post_nav_wait_ms)
             logger.info(

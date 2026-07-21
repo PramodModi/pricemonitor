@@ -7,16 +7,10 @@ portals:
     product_id_pattern: "/dp/([A-Z0-9]{10})"
     affiliate_api: true        # Layer 6 — implement when PA-API access received
     pre_extract_hook: simulate_amazon_human_behaviour
-    # Railway datacenter IPs trigger AWS WAF JS challenge before serving the
-    # product page. networkidle waits for the challenge JS to run, get the
-    # WAF token, and reload to the real product page before extraction begins.
-    # post_nav_wait_ms gives extra time for the product page to fully settle.
-    # "load" waits for the full page load event — sufficient for the AWS WAF
-    # JS challenge to run, get the token, and reload to the real product page.
-    # "networkidle" risks timeout on Amazon due to continuous background XHR.
-    # "domcontentloaded" fires too early — catches the challenge page, not product.
-    goto_wait_until: load
-    post_nav_wait_ms: 3000
+    # WAF challenge handling is done in generic_scraper.py — no special
+    # wait_until needed here. domcontentloaded is correct for local (no WAF).
+    # On Railway, generic_scraper detects the WAF challenge page and waits
+    # for the JS-driven reload before extraction begins.
     # Layers confirmed absent on Amazon.in (July 2025 dump analysis):
     # - meta_tags: no OG/product meta tags served
     # - json_ld:   0 ld+json script blocks
