@@ -39,7 +39,8 @@ with col_info:
         st.caption(f"Brand: {p['brand']}")
 
     platform = p.get("platform", "amazon")
-    platform_label = "🛒 Amazon India" if platform == "amazon" else "🛍️ Flipkart"
+    #platform_label = "🛒 Amazon India" if platform == "amazon" else "🛍️ Flipkart"
+    platform_label = platform
     avail = "✅ In Stock" if p.get("availability") else "❌ Out of Stock"
     st.caption(f"{platform_label}  ·  {avail}")
 
@@ -61,7 +62,8 @@ with col_info:
         st.caption(f"Last checked: {p['last_checked_at']}")
 
     st.link_button(
-        f"View on {'Amazon India' if platform == 'amazon' else 'Flipkart'} →",
+        #f"View on {'Amazon India' if platform == 'amazon' else 'Flipkart'} →",
+        f"View on {platform} →",
         url=p["url"],  # URL already has affiliate tag from DB
         type="primary",
     )
@@ -74,7 +76,7 @@ if stats:
     col1, col2, col3 = st.columns(3)
     col1.metric("All-Time Low", f"₹{float(stats['all_time_low']):,.0f}")
     col2.metric("All-Time High", f"₹{float(stats['all_time_high']):,.0f}")
-    col3.metric("Price Drops", stats["drop_count"])
+    col3.metric("Price Drops checked", stats["drop_count"])
     if stats.get("first_tracked_at"):
         st.caption(f"Tracked since {stats['first_tracked_at'][:10]}")
 
