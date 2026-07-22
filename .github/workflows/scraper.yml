@@ -2,8 +2,8 @@ name: PriceMonitor Scraper
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # every 4 hours
-  workflow_dispatch:          # allow manual trigger from GitHub UI
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
 
 jobs:
   scrape:
@@ -31,6 +31,11 @@ jobs:
         working-directory: code
         run: |
           pip install -r requirements.txt
+
+      - name: Fix Ubuntu 24.04 package name conflict
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2t64
 
       - name: Install Playwright browsers
         working-directory: code
