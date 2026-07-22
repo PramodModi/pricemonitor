@@ -49,6 +49,8 @@ class ScrapeDiagnosticRepository:
         worker_id: Optional[int] = None,
         error_type: Optional[str] = None,
         error_message: Optional[str] = None,
+        trigger: Optional[str] = None,
+        triggered_by: Optional[str] = None,
     ) -> ScrapeDiagnostic:
         """
         Write one diagnostic row. Caller commits the session.
@@ -74,12 +76,15 @@ class ScrapeDiagnosticRepository:
             error_type=error_type,
             error_message=error_message,
             scraped_at=datetime.now(timezone.utc),
+            trigger=trigger,
+            triggered_by=triggered_by,
         )
         self._db.add(row)
         logger.debug(
             f"[DIAG] Queued diagnostic row — "
             f"job={scrape_job_id} portal={portal} status={status} "
-            f"method={extraction_method} attempt={attempt_number}"
+            f"method={extraction_method} attempt={attempt_number} "
+            f"trigger={trigger} triggered_by={triggered_by}"
         )
         return row
 

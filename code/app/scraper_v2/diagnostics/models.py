@@ -35,7 +35,7 @@ class ScrapeDiagnostic(Base):
     __tablename__ = "scrape_diagnostics"
 
     # ── Identity ──────────────────────────────────────────────────────────────
-    id = Column(
+    diagnostic_id = Column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
@@ -96,6 +96,18 @@ class ScrapeDiagnostic(Base):
     # ── Retry context ────────────────────────────────────────────────────────
     attempt_number = Column(Integer, nullable=False, default=1)
     worker_id = Column(Integer, nullable=True)
+
+    # ── Trigger context ───────────────────────────────────────────────────────
+    trigger = Column(
+        String,
+        nullable=True,
+        comment="scheduler | preview",
+    )
+    triggered_by = Column(
+        String,
+        nullable=True,
+        comment="'Github' for cron runs, user email for preview, null if unknown",
+    )
 
     # ── Error detail ─────────────────────────────────────────────────────────
     error_type = Column(

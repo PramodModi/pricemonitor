@@ -273,7 +273,11 @@ class ScraperWorker:
                 )
 
                 # Write diagnostic row regardless of success/failure
-                self._write_diagnostic(job, response)
+                self._write_diagnostic(
+                    job, response,
+                    trigger="scheduler",
+                    triggered_by="Github",
+                )
 
                 if response.success:
                     last_response = response
@@ -536,7 +540,13 @@ class ScraperWorker:
 
     # ── Diagnostic write (v2 only) ────────────────────────────────────────────
 
-    def _write_diagnostic(self, job: ScrapeJob, response) -> None:
+    def _write_diagnostic(
+        self,
+        job: ScrapeJob,
+        response,
+        trigger: Optional[str] = None,
+        triggered_by: Optional[str] = None,
+    ) -> None:
         """
         Write one row to scrape_diagnostics for observability.
         Called after every scrape attempt in v2 mode (success or failure).
@@ -547,30 +557,44 @@ class ScraperWorker:
             db = SessionLocal()
             try:
                 repo = ScrapeDiagnosticRepository(db)
+
+                # Derive status string from response.success boolean
+                if response.success:
+                    status = "success"
+                elif response.error_type is not None:
+                    from app.scraper_v2.models.scrape_result import ScrapeFailureReason
+                    if response.error_type == ScrapeFailureReason.BOT_DETECTED:
+                        status = "blocked"
+                    elif response.error_type == ScrapeFailureReason.TIMEOUT:
+                        status = "timeout"
+                    else:
+                        status = "failed"
+                else:
+                    status = "failed"
+
                 repo.insert(
+                    scrape_job_id=uuid.UUID(response.job_id) if response.job_id else uuid.uuid4(),
                     product_id=job.product_id,
                     run_id=job.run_id,
                     portal=response.portal,
+                    url=job.url,
+                    status=status,
+                    price_found=response.current_price if response.success else None,
                     worker_id=response.worker_id,
                     attempt_number=response.attempt_number,
-                    success=response.success,
                     extraction_method=response.extraction_method,
                     error_type=(
                         response.error_type.value
                         if response.error_type else None
                     ),
                     error_message=response.error_message,
-                    layers_attempted=(
-                        ",".join(response.layers_attempted)
-                        if response.layers_attempted else None
-                    ),
-                    layers_failed=(
-                        ",".join(response.layers_failed)
-                        if response.layers_failed else None
-                    ),
+                    layers_attempted=response.layers_attempted or None,
+                    layers_failed=response.layers_failed or None,
                     navigation_ms=response.navigation_ms,
                     extraction_ms=response.extraction_ms,
                     total_duration_ms=response.total_duration_ms,
+                    trigger=trigger,
+                    triggered_by=triggered_by,
                 )
                 db.commit()
             finally:

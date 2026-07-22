@@ -143,6 +143,40 @@ def preview_product(
                     context.close()
                     browser.close()
 
+            # Write diagnostic row — preview path
+            try:
+                from app.scraper_v2.diagnostics.repository import ScrapeDiagnosticRepository
+                from app.scraper_v2.models.scrape_result import ScrapeFailureReason
+                diag_repo = ScrapeDiagnosticRepository(db)
+                if result.success:
+                    diag_status = "success"
+                elif result.error_type == ScrapeFailureReason.BOT_DETECTED:
+                    diag_status = "blocked"
+                elif result.error_type == ScrapeFailureReason.TIMEOUT:
+                    diag_status = "timeout"
+                else:
+                    diag_status = "failed"
+                diag_repo.insert(
+                    scrape_job_id=uuid.uuid4(),
+                    portal=validated.platform,
+                    url=validated.canonical_url,
+                    status=diag_status,
+                    trigger="preview",
+                    triggered_by=None,  # email not available at preview step
+                    extraction_method=result.extraction_method,
+                    error_type=result.error_type.value if result.error_type else None,
+                    error_message=result.error_message,
+                    layers_attempted=result.layers_attempted or None,
+                    layers_failed=result.layers_failed or None,
+                    navigation_ms=result.navigation_ms,
+                    extraction_ms=result.extraction_ms,
+                    total_duration_ms=result.total_duration_ms,
+                )
+                db.commit()
+            except Exception as diag_exc:
+                db.rollback()
+                logger.warning(f"Failed to write preview diagnostic — error={str(diag_exc)}")
+
             if not result.success:
                 logger.error(
                     f"Scrape failed — url={validated.canonical_url} "
