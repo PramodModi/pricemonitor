@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.repositories.product_repo import ProductRepository
 from app.repositories.price_history_repo import PriceHistoryRepository
+from app.scraper_v2.engine import ScraperEngine
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -103,11 +104,6 @@ class ScraperWorker:
             self._flipkart = FlipkartScraper()
             self._fallback = ScraperAPIFallback()
 
-        # ── v2 scraper instance (shared across jobs — stateless between calls) ─
-        if settings.use_scraper_v2:
-            from app.scraper_v2.scrapers.generic_scraper import GenericScraper
-            self._generic = GenericScraper()
-
         logger.info(
             f"ScraperWorker initialised — "
             f"worker_id={self.worker_id} "
@@ -124,11 +120,9 @@ class ScraperWorker:
         scrape_queue until a None sentinel is received.
         Playwright and browser are cleaned up in a finally block.
 
-        Browser engine: always Chromium in v1 mode. In v2 mode, Chromium
-        is the default — Firefox is launched per-job when the portal config
-        requires it (context is closed and reopened with Firefox for that job).
-        The persistent browser here is Chromium; Firefox jobs open their own
-        short-lived browser inline in _process_job_v2().
+        Browser engine: always Chromium in v1 mode. In v2 mode, the browser
+        lifecycle is fully managed by ScraperEngine inside _process_job_v2() —
+        self._browser is only used by the v1 path.
         """
         logger.info(f"Worker starting — worker_id={self.worker_id}")
         with sync_playwright() as pw:
@@ -179,153 +173,34 @@ class ScraperWorker:
 
     def _process_job_v2(self, job: ScrapeJob) -> None:
         """
-        Process one ScrapeJob using GenericScraper from scraper_v2.
+        Process one ScrapeJob using ScraperEngine from scraper_v2.
 
-        Key differences from v1:
-        - Portal config drives browser engine — Firefox jobs open their own
-          short-lived browser; Chromium jobs reuse self._browser.
-        - GenericScraper.scrape() handles bot detection internally and returns
-          a ScrapeResponse with success=False instead of raising.
-        - Retry logic and exponential backoff are preserved.
-        - ScrapeDiagnostic row written after every attempt (success or failure).
+        ScraperEngine owns the entire browser lifecycle, retry cascade,
+        failure classification, and fallback strategy. This method is a
+        thin caller — it passes the URL, receives a ScrapeResponse, writes
+        the diagnostic row, then hands the result to _write_result().
+
+        When scraper_v3 arrives, only engine.py changes. This method and
+        everything above it stays untouched.
         """
-        from app.scraper_v2.scrapers.registry import get_config
-        from app.scraper_v2.core.exceptions import UnsupportedPlatformError
-        from app.scraper_v2.models.scrape_result import ScrapeFailureReason
+        logger.info(
+            f"v2 scrape start — "
+            f"worker_id={self.worker_id} "
+            f"product_id={str(job.product_id)} "
+            f"url={job.url}"
+        )
 
-        try:
-            portal_config = get_config(job.platform)
-        except UnsupportedPlatformError:
-            logger.error(
-                f"Unsupported platform in scraper_v2 — "
-                f"platform={job.platform} product_id={str(job.product_id)}"
-            )
-            self._write_result(job, result=None, last_error=None)
-            return
+        with ScraperEngine() as engine:
+            response = engine.scrape(job.url)
 
-        job_id = str(uuid.uuid4())
-        last_response = None
+        self._write_diagnostic(
+            job, response,
+            trigger="scheduler",
+            triggered_by="Github",
+        )
 
-        for attempt in range(1, settings.scrape_retry_limit + 1):
-            browser_to_use = self._browser
-            firefox_browser = None
-            context: Optional[BrowserContext] = None
-
-            try:
-                # Firefox portals (e.g. Myntra) open their own short-lived browser
-                if portal_config.browser == "firefox":
-                    firefox_browser = self._pw.firefox.launch(headless=True)
-                    browser_to_use = firefox_browser
-
-                if job.platform == "myntra":
-                    # Myntra: Firefox browser, no UA override.
-                    # Firefox has a distinct TLS fingerprint that bypasses
-                    # Myntra's bot detection. A Chrome UA on a Firefox TLS
-                    # profile is a mismatch that gets flagged.
-                    context = browser_to_use.new_context(
-                        viewport={"width": 1280, "height": 800},
-                        locale="en-IN",
-                        extra_http_headers={
-                            "Accept-Language": "en-IN,en;q=0.9",
-                            "Accept": (
-                                "text/html,application/xhtml+xml,application/xml;"
-                                "q=0.9,image/avif,image/webp,*/*;q=0.8"
-                            ),
-                            "Accept-Encoding": "gzip, deflate, br",
-                            "Upgrade-Insecure-Requests": "1",
-                        },
-                    )
-                else:
-                    # Amazon / Flipkart — match run_test.py context exactly
-                    context = browser_to_use.new_context(
-                        viewport={"width": 1280, "height": 800},
-                        locale="en-IN",
-                        timezone_id="Asia/Kolkata",
-                        user_agent=(
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/124.0.0.0 Safari/537.36"
-                        ),
-                        extra_http_headers={
-                            "Accept-Language": "en-IN,en;q=0.9",
-                            "Accept": (
-                                "text/html,application/xhtml+xml,application/xml;"
-                                "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-                            ),
-                            "Accept-Encoding": "gzip, deflate, br",
-                            "Upgrade-Insecure-Requests": "1",
-                            "Sec-Fetch-Dest": "document",
-                            "Sec-Fetch-Mode": "navigate",
-                            "Sec-Fetch-Site": "none",
-                            "Sec-Fetch-User": "?1",
-                        },
-                    )
-                page = context.new_page()
-                Stealth().apply_stealth_sync(page)
-
-                response = self._generic.scrape(
-                    page=page,
-                    url=job.url,
-                    config=portal_config,
-                    job_id=job_id,
-                    attempt_number=attempt,
-                    worker_id=self.worker_id,
-                )
-
-                # Write diagnostic row regardless of success/failure
-                self._write_diagnostic(
-                    job, response,
-                    trigger="scheduler",
-                    triggered_by="Github",
-                )
-
-                if response.success:
-                    last_response = response
-                    break  # success — exit retry loop
-
-                # Failure — decide whether to retry
-                error_type = response.error_type
-                if error_type == ScrapeFailureReason.BOT_DETECTED:
-                    logger.warning(
-                        f"Bot detected — no retry for bot blocks — "
-                        f"worker_id={self.worker_id} "
-                        f"product_id={str(job.product_id)} "
-                        f"attempt={attempt}"
-                    )
-                    last_response = response
-                    break  # bot detection: don't retry (ScraperAPIFallback stub pending)
-
-                if attempt < settings.scrape_retry_limit:
-                    backoff = 2 ** attempt
-                    logger.warning(
-                        f"Scrape failed, retrying — "
-                        f"worker_id={self.worker_id} "
-                        f"product_id={str(job.product_id)} "
-                        f"attempt={attempt} "
-                        f"backoff_seconds={backoff} "
-                        f"error_type={error_type}"
-                    )
-                    time.sleep(backoff)
-
-                last_response = response
-
-            except Exception as exc:
-                logger.error(
-                    f"Unexpected error in v2 scrape — "
-                    f"worker_id={self.worker_id} "
-                    f"product_id={str(job.product_id)} "
-                    f"attempt={attempt} "
-                    f"error={str(exc)}"
-                )
-            finally:
-                if context:
-                    context.close()
-                if firefox_browser:
-                    firefox_browser.close()
-
-        # Convert ScrapeResponse → _write_result() compatible result
-        if last_response and last_response.success:
-            self._write_result(job, result=last_response, last_error=None)
+        if response.success:
+            self._write_result(job, result=response, last_error=None)
         else:
             self._write_result(job, result=None, last_error=None)
 

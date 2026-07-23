@@ -19,8 +19,7 @@ from app.core.exceptions import (
     ScrapeError,
 )
 
-from app.scraper_v2.scrapers.generic_scraper import GenericScraper
-from app.scraper_v2.scrapers.registry import get_config
+from app.scraper_v2.engine import ScraperEngine
 
 from app.scrapers.amazon import AmazonScraper
 from app.scrapers.flipkart import FlipkartScraper
@@ -31,7 +30,6 @@ logger = get_logger(__name__)
 
 _amazon_scraper = AmazonScraper()
 _flipkart_scraper = FlipkartScraper()
-_scraper_v2 = GenericScraper()
 
 
 @router.post(
@@ -72,76 +70,9 @@ def preview_product(
 
     # Step 2 — live scrape
     try:
-        from playwright.sync_api import sync_playwright
-        from playwright_stealth import Stealth
-
         if settings.use_scraper_v2:
-            portal_config = get_config(validated.platform)
-            with sync_playwright() as pw:
-                if portal_config.browser == "firefox":
-                    browser = pw.firefox.launch(headless=True)
-                else:
-                    browser = pw.chromium.launch(
-                        headless=True,
-                        args=[
-                            "--disable-blink-features=AutomationControlled",
-                            "--disable-http2",
-                        ],
-                    )
-                if validated.platform == "myntra":
-                    # Myntra: Firefox browser, no UA override.
-                    # Firefox has a distinct TLS fingerprint that bypasses
-                    # Myntra's bot detection. A Chrome UA on a Firefox TLS
-                    # profile is a mismatch that gets flagged.
-                    context = browser.new_context(
-                        locale="en-IN",
-                        viewport={"width": 1280, "height": 800},
-                        extra_http_headers={
-                            "Accept-Language": "en-IN,en;q=0.9",
-                            "Accept": (
-                                "text/html,application/xhtml+xml,application/xml;"
-                                "q=0.9,image/avif,image/webp,*/*;q=0.8"
-                            ),
-                            "Accept-Encoding": "gzip, deflate, br",
-                            "Upgrade-Insecure-Requests": "1",
-                        },
-                    )
-                else:
-                    # Amazon / Flipkart — match run_test.py context exactly
-                    context = browser.new_context(
-                        viewport={"width": 1280, "height": 800},
-                        locale="en-IN",
-                        timezone_id="Asia/Kolkata",
-                        user_agent=(
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/124.0.0.0 Safari/537.36"
-                        ),
-                        extra_http_headers={
-                            "Accept-Language": "en-IN,en;q=0.9",
-                            "Accept": (
-                                "text/html,application/xhtml+xml,application/xml;"
-                                "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-                            ),
-                            "Accept-Encoding": "gzip, deflate, br",
-                            "Upgrade-Insecure-Requests": "1",
-                            "Sec-Fetch-Dest": "document",
-                            "Sec-Fetch-Mode": "navigate",
-                            "Sec-Fetch-Site": "none",
-                            "Sec-Fetch-User": "?1",
-                        },
-                    )
-                page = context.new_page()
-                Stealth().apply_stealth_sync(page)
-                try:
-                    result = _scraper_v2.scrape(
-                        page=page,
-                        url=validated.canonical_url,
-                        config=portal_config,
-                    )
-                finally:
-                    context.close()
-                    browser.close()
+            with ScraperEngine() as engine:
+                result = engine.scrape(validated.canonical_url)
 
             # Write diagnostic row — preview path
             try:
@@ -164,7 +95,7 @@ def preview_product(
                     trigger="preview",
                     triggered_by=None,  # email not available at preview step
                     extraction_method=result.extraction_method,
-                    error_type=result.error_type.value if result.error_type else None,
+                    error_type=result.error_type.value if hasattr(result.error_type, "value") else result.error_type,
                     error_message=result.error_message,
                     layers_attempted=result.layers_attempted or None,
                     layers_failed=result.layers_failed or None,
@@ -193,6 +124,8 @@ def preview_product(
 
         else:
             # v1 path — original code untouched
+            from playwright.sync_api import sync_playwright
+            from playwright_stealth import Stealth
             scraper = (
                 _amazon_scraper
                 if validated.platform == "amazon"
