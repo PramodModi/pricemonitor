@@ -82,6 +82,7 @@ from __future__ import annotations
 
 import random
 import time
+import uuid
 from typing import Optional
 from urllib.parse import quote_plus, urlparse
 
@@ -189,15 +190,19 @@ class ScraperEngine:
         config = self._resolve_config(url)
         if config is None:
             return ScrapeResponse(
+                job_id=str(uuid.uuid4()),
                 success=False,
                 portal="unknown",
                 error_type=ScrapeFailureReason.UNKNOWN,
                 error_message=f"No portal config found for URL: {url!r:.200}",
             )
 
+        job_id = str(uuid.uuid4())   # one ID for the full cascade
+
         logger.info(
             f"[ENGINE] scrape start — "
             f"portal={config.name} "
+            f"job_id={job_id} "
             f"url={url!r:.200}"
         )
 
@@ -236,11 +241,17 @@ class ScraperEngine:
             # ── Dispatch to the right attempt handler ─────────────────────────
             try:
                 if mechanism == RetryMechanism.CACHED_PAGE:
-                    response = self._attempt_cached_page(url, config, attempt)
+                    response = self._attempt_cached_page(url, config, attempt, job_id)
                 elif mechanism == RetryMechanism.SCRAPERAPI:
-                    response = self._attempt_scraperapi(url, config, attempt)
+                    response = self._attempt_scraperapi(url, config, attempt, job_id)
+                elif mechanism == RetryMechanism.GIVE_UP:
+                    logger.error(
+                        f"[ATTEMPT] give_up — no ScraperAPI key configured, "
+                        f"cannot proceed further — portal={config.name}"
+                    )
+                    break
                 else:
-                    response = self._attempt_browser(url, config, attempt, mechanism)
+                    response = self._attempt_browser(url, config, attempt, mechanism, job_id)
             except Exception as exc:
                 # Unexpected error inside an attempt — log, treat as unknown, continue
                 logger.error(
@@ -291,6 +302,7 @@ class ScraperEngine:
             f"url={url!r:.200}"
         )
         return last_response or ScrapeResponse(
+            job_id=job_id,
             success=False,
             portal=config.name,
             error_type=ScrapeFailureReason.UNKNOWN,
@@ -368,6 +380,7 @@ class ScraperEngine:
         config: PortalConfig,
         attempt: int,
         mechanism: RetryMechanism,
+        job_id: str,
     ) -> ScrapeResponse:
         """
         Run one browser-based attempt.
@@ -405,7 +418,7 @@ class ScraperEngine:
                 page = ctx.new_page()
                 return self._scraper.scrape(
                     page=page, url=url, config=config,
-                    attempt_number=attempt,
+                    job_id=job_id, attempt_number=attempt,
                 )
             finally:
                 try:
@@ -420,7 +433,7 @@ class ScraperEngine:
                 self._apply_stealth(page)
                 return self._scraper.scrape(
                     page=page, url=url, config=config,
-                    attempt_number=attempt,
+                    job_id=job_id, attempt_number=attempt,
                 )
             finally:
                 try:
@@ -435,6 +448,7 @@ class ScraperEngine:
         url: str,
         config: PortalConfig,
         attempt: int,
+        job_id: str,
     ) -> ScrapeResponse:
         """
         Try Google Cache then Bing Cache in order.
@@ -490,6 +504,7 @@ class ScraperEngine:
                     page=page,
                     url=url,           # original URL — product_id extraction
                     config=config,
+                    job_id=job_id,
                     attempt_number=attempt,
                 )
                 if response.success:
@@ -506,6 +521,7 @@ class ScraperEngine:
                     pass
 
         return ScrapeResponse(
+            job_id=job_id,
             success=False,
             portal=config.name,
             attempt_number=attempt,
@@ -520,6 +536,7 @@ class ScraperEngine:
         url: str,
         config: PortalConfig,
         attempt: int,
+        job_id: str,
     ) -> ScrapeResponse:
         """
         Fetch rendered HTML via ScraperAPI (residential proxy, CAPTCHA solving),
@@ -538,6 +555,7 @@ class ScraperEngine:
                 f"cannot attempt ScraperAPI fallback for portal={config.name}"
             )
             return ScrapeResponse(
+                job_id=job_id,
                 success=False,
                 portal=config.name,
                 attempt_number=attempt,
@@ -570,6 +588,7 @@ class ScraperEngine:
                 f"error={exc}"
             )
             return ScrapeResponse(
+                job_id=job_id,
                 success=False,
                 portal=config.name,
                 attempt_number=attempt,
@@ -585,6 +604,7 @@ class ScraperEngine:
 
         if resp.status_code != 200:
             return ScrapeResponse(
+                job_id=job_id,
                 success=False,
                 portal=config.name,
                 attempt_number=attempt,
@@ -603,6 +623,7 @@ class ScraperEngine:
                 page=page,
                 url=url,
                 config=config,
+                job_id=job_id,
                 attempt_number=attempt,
             )
         finally:

@@ -201,21 +201,33 @@ class FailureClassifier:
                 f"layers_tried={layers_tried} "
                 f"layers_failed={layers_failed}"
             )
-            # selector layer failed → CSS class rotation (Flipkart obfuscated classes)
+
+            # If heuristic layer failed, there was no ₹ symbol anywhere on
+            # the page — this is a bot-check / CAPTCHA page, not a real
+            # product page with stale selectors.
+            if "heuristic" in layers_failed:
+                evidence.append(
+                    f"heuristic layer failed — no ₹ symbol found anywhere on page. "
+                    f"Page is almost certainly a bot-check/CAPTCHA page, not a "
+                    f"real product page. Railway datacenter IP likely blocked."
+                )
+                return self._build(FailureCause.CAPTCHA, RetryMechanism.SCRAPERAPI,
+                                   0.85, evidence, portal)
+
+            # selector layer failed but heuristic passed → CSS class rotation
+            # (₹ was on the page, just the CSS selectors couldn't find it)
             if "selector" in layers_failed:
                 evidence.append(
-                    f"selector layer in layers_failed — Flipkart/portal CSS "
-                    f"classes likely rotated. Update portals.yaml price_selectors."
+                    f"selector layer in layers_failed (heuristic passed) — "
+                    f"CSS classes likely rotated. Update portals.yaml price_selectors."
                 )
                 return self._build(FailureCause.CSS_STALE, RetryMechanism.SCRAPERAPI,
                                    0.80, evidence, portal)
-            # selector not tried or not failed → structural extraction failed
-            # (JSON-LD absent, heuristic found nothing, hydration incomplete)
+
+            # Neither heuristic nor selector failed — structural layers missed
             evidence.append(
-                f"selector layer not in layers_failed — structural layers "
-                f"(json_ld / semantic / heuristic) all returned None. "
-                f"Possible: JS hydration incomplete (check post_nav_wait_ms), "
-                f"or page layout restructured."
+                f"selector/heuristic not in layers_failed — structural layers "
+                f"(json_ld / semantic) failed. Possible JS hydration issue."
             )
             return self._build(FailureCause.HTML_STRUCTURE, RetryMechanism.NEW_CONTEXT,
                                0.75, evidence, portal)
