@@ -227,10 +227,9 @@ class ScraperEngine:
                     f"sleeping {_RATE_LIMIT_BACKOFF_S}s before attempt={attempt}"
                 )
                 time.sleep(_RATE_LIMIT_BACKOFF_S)
-            elif attempt > 1:
-                # Progressive delay between attempts — 2s, 4s, 6s, 8s
-                # Gives the previous portal session time to expire before
-                # the next mechanism is tried.
+            elif attempt > 1 and mechanism != RetryMechanism.GIVE_UP:
+                # Progressive delay between real attempts — 2s, 4s, 6s, 8s.
+                # Skip for GIVE_UP — no point waiting before immediately breaking.
                 delay = _RETRY_DELAY_BASE_S * (attempt - 1)
                 logger.info(
                     f"[ATTEMPT] progressive delay — "
@@ -363,13 +362,25 @@ class ScraperEngine:
             return RetryMechanism.FIREFOX
 
         # Standard cascade
-        cascade = {
-            1: RetryMechanism.NEW_CONTEXT,
-            2: RetryMechanism.NEW_CONTEXT,
-            3: RetryMechanism.FIREFOX,
-            4: RetryMechanism.CACHED_PAGE,
-            5: RetryMechanism.SCRAPERAPI if self._has_scraperapi() else RetryMechanism.GIVE_UP,
-        }
+        # Amazon blocks archiving (noarchive meta tag) — Google Cache and Bing
+        # Cache always return empty for Amazon URLs. Skip cached_page for amazon
+        # and go straight to scraperapi at attempt 4.
+        if config.name == "amazon":
+            cascade = {
+                1: RetryMechanism.NEW_CONTEXT,
+                2: RetryMechanism.NEW_CONTEXT,
+                3: RetryMechanism.FIREFOX,
+                4: RetryMechanism.SCRAPERAPI if self._has_scraperapi() else RetryMechanism.GIVE_UP,
+                5: RetryMechanism.SCRAPERAPI if self._has_scraperapi() else RetryMechanism.GIVE_UP,
+            }
+        else:
+            cascade = {
+                1: RetryMechanism.NEW_CONTEXT,
+                2: RetryMechanism.NEW_CONTEXT,
+                3: RetryMechanism.FIREFOX,
+                4: RetryMechanism.CACHED_PAGE,
+                5: RetryMechanism.SCRAPERAPI if self._has_scraperapi() else RetryMechanism.GIVE_UP,
+            }
         return cascade.get(attempt, RetryMechanism.GIVE_UP)
 
     # ── Attempt 1 & 2: browser-based ─────────────────────────────────────────
