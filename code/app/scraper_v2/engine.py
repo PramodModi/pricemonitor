@@ -513,9 +513,10 @@ class ScraperEngine:
 
                 response = self._scraper.scrape(
                     page=page,
-                    url=url,           # original URL — product_id extraction
+                    url=url,              # original URL — product_id extraction
                     config=config,
                     job_id=job_id,
+                    skip_navigation=True, # page already navigated to cache URL
                     attempt_number=attempt,
                 )
                 if response.success:
@@ -634,8 +635,11 @@ class ScraperEngine:
                 error_message=f"ScraperAPI HTTP {resp.status_code}",
             )
 
-        # Feed rendered HTML into GenericScraper via page.set_content()
-        # Reuse self._pw — do NOT call sync_playwright() again inside asyncio loop
+        # Feed rendered HTML into GenericScraper via page.set_content().
+        # skip_navigation=True — HTML is already loaded; calling page.goto()
+        # inside scrape() would navigate to the live (bot-blocked) URL and
+        # discard the ScraperAPI HTML entirely.
+        # Reuse self._pw — do NOT call sync_playwright() again inside asyncio loop.
         browser = self._pw.chromium.launch(headless=True)
         try:
             ctx  = browser.new_context()
@@ -647,6 +651,7 @@ class ScraperEngine:
                 config=config,
                 job_id=job_id,
                 attempt_number=attempt,
+                skip_navigation=True,
             )
         finally:
             try:

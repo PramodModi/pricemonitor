@@ -83,6 +83,7 @@ class GenericScraper(BaseScraper):
         job_id: Optional[str] = None,
         attempt_number: int = 1,
         worker_id: Optional[int] = None,
+        skip_navigation: bool = False,
     ) -> ScrapeResponse:
         """
         Scrape one product page and return a fully populated ScrapeResponse.
@@ -92,8 +93,13 @@ class GenericScraper(BaseScraper):
             url:            Canonical product URL.
             config:         PortalConfig from registry — selectors, hooks, etc.
             job_id:         Correlation ID from ScrapeRequest (echoed in response).
-            attempt_number: Which retry this is (1 = first attempt).
-            worker_id:      Worker thread ID for diagnostics.
+            attempt_number:   Which retry this is (1 = first attempt).
+            worker_id:        Worker thread ID for diagnostics.
+            skip_navigation:  When True, skip page.goto() — the caller has
+                              already loaded HTML into the page via set_content()
+                              (ScraperAPI path) or page.goto() to a cache URL.
+                              Navigating again would overwrite the pre-loaded
+                              HTML with a live bot-blocked page.
 
         Returns:
             ScrapeResponse — success=True with product data, or
@@ -110,63 +116,70 @@ class GenericScraper(BaseScraper):
 
         # ── Navigation ──────────────────────────────────────────────────────
         # Note: browser engine selection (chromium vs firefox) happens at the
-        # WorkerManager/run_test level — config.browser drives that decision.──
-        try:
-            t_nav = time.monotonic()
-            page.goto(
-                url,
-                timeout=settings.page_goto_timeout_ms,
-                wait_until=config.goto_wait_until,
-            )
-            nav_ms = int((time.monotonic() - t_nav) * 1000)
+        # WorkerManager/run_test level — config.browser drives that decision.
+        #
+        # skip_navigation=True: caller pre-loaded HTML via set_content() or
+        # navigated to a cache URL. Do NOT call page.goto() — that would
+        # overwrite the pre-loaded HTML by navigating to the live (bot-blocked)
+        # product URL, discarding the ScraperAPI/cached HTML entirely.
+        if not skip_navigation:
+            try:
+                t_nav = time.monotonic()
+                page.goto(
+                    url,
+                    timeout=settings.page_goto_timeout_ms,
+                    wait_until=config.goto_wait_until,
+                )
+                nav_ms = int((time.monotonic() - t_nav) * 1000)
 
-            # ── WAF challenge handling (Amazon on Railway datacenter IPs) ──────
-            # AWS WAF serves a JS challenge page before the real product page.
-            # The challenge JS runs, gets a token, then does window.location.reload().
-            # page.goto() returns on the challenge page (domcontentloaded fires there).
-            # We detect the challenge and wait for the reload to complete.
-            if config.name == "amazon":
-                try:
-                    page_content = page.content()
-                    if "awswaf" in page_content or "AwsWafIntegration" in page_content:
-                        logger.info(
-                            f"[NAV] portal={config.name} — AWS WAF challenge detected, "
-                            f"waiting for reload — url={url}"
-                        )
-                        # Wait for the WAF JS to complete and reload to product page.
-                        # wait_for_url waits until page URL matches or timeout.
-                        # Since URL stays the same after reload, we wait for the
-                        # page to no longer contain WAF challenge content.
-                        page.wait_for_load_state("load", timeout=settings.page_goto_timeout_ms)
-                        page.wait_for_timeout(3000)
-                        nav_ms = int((time.monotonic() - t_nav) * 1000)
-                        logger.info(
-                            f"[NAV] portal={config.name} — post-WAF nav_ms={nav_ms}"
-                        )
-                except Exception as waf_exc:
-                    logger.debug(f"[NAV] WAF check error — {waf_exc}")
+                # ── WAF challenge handling (Amazon on Railway datacenter IPs) ──
+                # AWS WAF serves a JS challenge page before the real product page.
+                # The challenge JS runs, gets a token, then does window.location.reload().
+                # page.goto() returns on the challenge page (domcontentloaded fires there).
+                # We detect the challenge and wait for the reload to complete.
+                if config.name == "amazon":
+                    try:
+                        page_content = page.content()
+                        if "awswaf" in page_content or "AwsWafIntegration" in page_content:
+                            logger.info(
+                                f"[NAV] portal={config.name} — AWS WAF challenge detected, "
+                                f"waiting for reload — url={url}"
+                            )
+                            page.wait_for_load_state("load", timeout=settings.page_goto_timeout_ms)
+                            page.wait_for_timeout(3000)
+                            nav_ms = int((time.monotonic() - t_nav) * 1000)
+                            logger.info(
+                                f"[NAV] portal={config.name} — post-WAF nav_ms={nav_ms}"
+                            )
+                    except Exception as waf_exc:
+                        logger.debug(f"[NAV] WAF check error — {waf_exc}")
 
-            if config.post_nav_wait_ms > 0:
-                page.wait_for_timeout(config.post_nav_wait_ms)
+                if config.post_nav_wait_ms > 0:
+                    page.wait_for_timeout(config.post_nav_wait_ms)
+                logger.info(
+                    f"[NAV] portal={config.name} nav_ms={nav_ms} url={url}"
+                )
+            except PlaywrightTimeout:
+                total_ms = int((time.monotonic() - t_total_start) * 1000)
+                logger.warning(
+                    f"[SCRAPE_FAIL] portal={config.name} "
+                    f"status=timeout nav_ms={nav_ms} url={url}"
+                )
+                return ScrapeResponse(
+                    success=False,
+                    job_id=job_id,
+                    portal=config.name,
+                    total_duration_ms=total_ms,
+                    navigation_ms=nav_ms,
+                    attempt_number=attempt_number,
+                    worker_id=worker_id,
+                    error_type=ScrapeFailureReason.TIMEOUT,
+                    error_message="page.goto() timed out",
+                )
+        else:
             logger.info(
-                f"[NAV] portal={config.name} nav_ms={nav_ms} url={url}"
-            )
-        except PlaywrightTimeout:
-            total_ms = int((time.monotonic() - t_total_start) * 1000)
-            logger.warning(
-                f"[SCRAPE_FAIL] portal={config.name} "
-                f"status=timeout nav_ms={nav_ms} url={url}"
-            )
-            return ScrapeResponse(
-                success=False,
-                job_id=job_id,
-                portal=config.name,
-                total_duration_ms=total_ms,
-                navigation_ms=nav_ms,
-                attempt_number=attempt_number,
-                worker_id=worker_id,
-                error_type=ScrapeFailureReason.TIMEOUT,
-                error_message="page.goto() timed out",
+                f"[NAV] portal={config.name} skip_navigation=True "
+                f"(HTML pre-loaded by caller) url={url}"
             )
 
         # ── Bot detection ─────────────────────────────────────────────────────
