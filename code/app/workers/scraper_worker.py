@@ -483,7 +483,8 @@ class ScraperWorker:
                     extraction_method=response.extraction_method,
                     error_type=(
                         response.error_type.value
-                        if response.error_type else None
+                        if hasattr(response.error_type, "value")
+                        else response.error_type
                     ),
                     error_message=response.error_message,
                     layers_attempted=response.layers_attempted or None,
