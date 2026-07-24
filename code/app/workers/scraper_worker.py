@@ -116,15 +116,38 @@ class ScraperWorker:
         """
         Main worker loop. Launched as a daemon thread by WorkerManager.
 
-        Initialises Playwright and launches a browser, then loops on the
-        scrape_queue until a None sentinel is received.
-        Playwright and browser are cleaned up in a finally block.
-
-        Browser engine: always Chromium in v1 mode. In v2 mode, the browser
-        lifecycle is fully managed by ScraperEngine inside _process_job_v2() —
-        self._browser is only used by the v1 path.
+        Branches on use_scraper_v2:
+          v2 — ScraperEngine owns Playwright entirely. The worker must NOT
+               call sync_playwright() — doing so would open a second Playwright
+               instance in the same thread, which raises:
+               "Playwright Sync API inside the asyncio loop"
+               (even outside asyncio, two sync_playwright() calls in one thread
+               conflict). ScraperEngine starts and stops its own instance per job.
+          v1 — Worker owns Playwright and a long-lived Chromium browser.
+               Preserved intact for rollback (USE_SCRAPER_V2=false).
         """
         logger.info(f"Worker starting — worker_id={self.worker_id}")
+        if settings.use_scraper_v2:
+            self._run_v2()
+        else:
+            self._run_v1()
+
+    def _run_v2(self) -> None:
+        """
+        v2 path — ScraperEngine owns the full Playwright + browser lifecycle.
+        Worker holds no Playwright instance of its own. _loop() calls
+        _process_job_v2() which opens a ScraperEngine context manager per job.
+        """
+        try:
+            self._loop()
+        finally:
+            logger.info(f"Worker stopped — worker_id={self.worker_id}")
+
+    def _run_v1(self) -> None:
+        """
+        v1 path — worker owns Playwright and a long-lived Chromium browser.
+        Preserved intact for rollback. Activated when USE_SCRAPER_V2=false.
+        """
         with sync_playwright() as pw:
             self._pw = pw
             self._browser = pw.chromium.launch(
