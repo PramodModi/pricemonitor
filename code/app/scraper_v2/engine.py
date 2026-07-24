@@ -193,7 +193,7 @@ class ScraperEngine:
                 job_id=str(uuid.uuid4()),
                 success=False,
                 portal="unknown",
-                error_type=ScrapeFailureReason.UNKNOWN,
+                error_type=ScrapeFailureReason.ALL_LAYERS_FAILED,
                 error_message=f"No portal config found for URL: {url!r:.200}",
             )
 
@@ -304,7 +304,7 @@ class ScraperEngine:
             job_id=job_id,
             success=False,
             portal=config.name,
-            error_type=ScrapeFailureReason.UNKNOWN,
+            error_type=ScrapeFailureReason.ALL_LAYERS_FAILED,
             error_message=f"All {_MAX_ATTEMPTS} attempts exhausted",
         )
 
@@ -570,7 +570,7 @@ class ScraperEngine:
                 success=False,
                 portal=config.name,
                 attempt_number=attempt,
-                error_type=ScrapeFailureReason.UNKNOWN,
+                error_type=ScrapeFailureReason.ALL_LAYERS_FAILED,
                 error_message="ScraperAPI key not configured",
             )
 
@@ -581,16 +581,27 @@ class ScraperEngine:
             f"url={url!r:.200}"
         )
 
+        # premium=true uses ScraperAPI's residential proxy pool with full
+        # JS rendering — required for React SPAs like Myntra where price is
+        # injected by JS after initial HTML load.
+        # premium costs 10 credits per request vs 1 for standard.
+        # Only enabled for portals that need it (Myntra confirmed, others TBD).
+        use_premium = config.name in ("myntra",)
+
         try:
+            params = {
+                "api_key":      api_key,
+                "url":          url,
+                "render":       "true",
+                "country_code": "in",
+            }
+            if use_premium:
+                params["premium"] = "true"
+
             resp = requests.get(
                 "http://api.scraperapi.com",
-                params={
-                    "api_key":      api_key,
-                    "url":          url,
-                    "render":       "true",
-                    "country_code": "in",
-                },
-                timeout=90,
+                params=params,
+                timeout=120,  # premium requests take longer
             )
         except requests.RequestException as exc:
             logger.error(
@@ -603,7 +614,7 @@ class ScraperEngine:
                 success=False,
                 portal=config.name,
                 attempt_number=attempt,
-                error_type=ScrapeFailureReason.UNKNOWN,
+                error_type=ScrapeFailureReason.TIMEOUT,
                 error_message=f"ScraperAPI network error: {exc}",
             )
 
@@ -619,7 +630,7 @@ class ScraperEngine:
                 success=False,
                 portal=config.name,
                 attempt_number=attempt,
-                error_type=ScrapeFailureReason.UNKNOWN,
+                error_type=ScrapeFailureReason.BOT_DETECTED,
                 error_message=f"ScraperAPI HTTP {resp.status_code}",
             )
 

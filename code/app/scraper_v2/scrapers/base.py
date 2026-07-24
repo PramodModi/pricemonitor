@@ -378,7 +378,7 @@ class BaseScraper:
             2. pip install python-amazon-paapi5
             3. Replace the NotImplementedError block below
         """
-        from scraper_v2.core.config import settings
+        from app.scraper_v2.core.config import settings
 
         if not settings.amazon_paapi_key or not settings.amazon_paapi_secret:
             # Credentials not configured — skip silently
