@@ -7,11 +7,12 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.fastapi.schemas.product import (
     PreviewRequest, PreviewResponse, ProductOut,
-    LiveData, CatalogData, PriceStats,
+    LiveData, CatalogData, PriceStats, PricePoint,
 )
 from app.services.url_validator import url_validator
 from app.services.preview_cache import preview_cache, ProductSnapshot
 from app.repositories.product_repo import ProductRepository
+from app.repositories.price_history_repo import PriceHistoryRepository
 from app.core.exceptions import (
     InvalidURLError,
     UnsupportedPlatformError,
@@ -268,7 +269,8 @@ def get_product(
     db: Session = Depends(get_db),
 ) -> ProductOut:
     """
-    Retrieve full product details including watcher count and price stats.
+    Retrieve full product details including watcher count, price stats,
+    and price history for the chart.
     """
     product_repo = ProductRepository(db)
     product = product_repo.get_by_id(product_id)
@@ -285,6 +287,9 @@ def get_product(
     watcher_count = product_repo.get_watcher_count(product_id)
     price_stats_raw = product_repo.get_price_stats(product_id)
 
+    ph_repo = PriceHistoryRepository(db)
+    history_rows = ph_repo.get_for_product(product_id, limit=90)
+
     return ProductOut(
         **{
             c.name: getattr(product, c.name)
@@ -292,4 +297,8 @@ def get_product(
         },
         watcher_count=watcher_count,
         price_stats=PriceStats(**price_stats_raw) if price_stats_raw else None,
+        price_history=[
+            PricePoint(checked_at=row.checked_at, price=row.price)
+            for row in history_rows
+        ],
     )

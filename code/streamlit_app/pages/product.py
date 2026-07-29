@@ -13,6 +13,10 @@ if not product_id:
     st.info("No product selected.")
     st.stop()
 
+if st.button("← Back to My Items"):
+    st.session_state.view_product_id = None
+    st.switch_page("pages/dashboard.py")
+
 with st.spinner("Loading product..."):
     result = get_product(product_id)
 
@@ -76,14 +80,28 @@ if stats:
     col1, col2, col3 = st.columns(3)
     col1.metric("All-Time Low", f"₹{float(stats['all_time_low']):,.0f}")
     col2.metric("All-Time High", f"₹{float(stats['all_time_high']):,.0f}")
-    col3.metric("Price Drops checked", stats["drop_count"])
+    col3.metric("Price checked", stats["drop_count"])
     if stats.get("first_tracked_at"):
         st.caption(f"Tracked since {stats['first_tracked_at'][:10]}")
 
+    # ── Price history chart ───────────────────────────────────────────────────
+    history = p.get("price_history", [])
+    if len(history) >= 2:
+        import pandas as pd
+
+        with st.spinner("Loading price chart..."):
+            df = pd.DataFrame(history)
+            df["checked_at"] = pd.to_datetime(df["checked_at"])
+            df["price"] = df["price"].astype(float)
+
+            # Format date as "DD MMM" for display (e.g. "14 Jul").
+            # Full datetime is preserved in checked_at so same-day readings
+            # remain as separate data points — nothing is dropped or averaged.
+            df["date"] = df["checked_at"].dt.strftime("%-d %b")
+
+        st.line_chart(df, x="date", y="price", y_label="Price (₹)", x_label="Date")
+    elif len(history) == 1:
+        st.caption("Only one data point so far — chart will appear after the next scrape run.")
+
 if p.get("watcher_count"):
     st.caption(f"👥 {p['watcher_count']} people watching this product")
-
-st.divider()
-if st.button("← Back to My Items"):
-    st.session_state.view_product_id = None
-    st.switch_page("pages/dashboard.py")
