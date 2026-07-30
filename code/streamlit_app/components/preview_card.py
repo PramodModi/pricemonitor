@@ -145,7 +145,7 @@ def render_preview_card(preview: dict) -> None:
                 <div style="flex:1;background:#f3f4f6;border-radius:6px;
                             padding:10px;text-align:center;">
                     <div style="font-size:18px;font-weight:700;">📉 {drop_count}</div>
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Price Drops</div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Price Checked</div>
                 </div>
                 <div style="flex:1;background:#f3f4f6;border-radius:6px;
                             padding:10px;text-align:center;">
