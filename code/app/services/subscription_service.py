@@ -23,11 +23,12 @@ class UnsubscribeResult:
 
 class SubscriptionService:
     """
-    Handles subscription deletion with product cleanup logic.
+    Handles subscription deletion.
 
-    When the last subscriber unsubscribes, the product record and all its
-    associated price_history rows are deleted via CASCADE. This keeps the
-    catalog clean — orphaned products are never retained.
+    Removes only the user's subscription row. The product record and its
+    full price_history are always retained — even when no subscribers remain.
+    This preserves price history so it is available if the same product is
+    tracked again by any user in the future.
     """
 
     def __init__(self, db: Session) -> None:
@@ -41,7 +42,7 @@ class SubscriptionService:
         email: str,
     ) -> UnsubscribeResult:
         """
-        Remove a user's subscription. Delete the product if no subscribers remain.
+        Remove a user's subscription. Product and price history are never deleted.
 
         Args:
             subscription_id: The subscription to remove.
@@ -49,7 +50,7 @@ class SubscriptionService:
                    mismatch (intentional — avoids confirming existence).
 
         Returns:
-            UnsubscribeResult with product_deleted flag and message.
+            UnsubscribeResult with product_deleted=False and message.
 
         Raises:
             SubscriptionNotFoundError: subscription_id does not exist, or
@@ -67,25 +68,15 @@ class SubscriptionService:
         product_id = subscription.product_id
         self.sub_repo.delete(subscription)
 
-        remaining = self.sub_repo.count_for_product(product_id)
-        product_deleted = False
-
-        if remaining == 0:
-            product = self.product_repo.get_by_id(product_id)
-            if product:
-                logger.info(
-                    f"Deleting product — no subscribers remain,"
-                    f"product_id={str(product_id)}"
-                )
-                self.product_repo.delete(product)
-                product_deleted = True
+        logger.info(
+            f"Subscription deleted — "
+            f"subscription_id={str(subscription_id)} "
+            f"product_id={str(product_id)} "
+            f"product and price history retained"
+        )
 
         return UnsubscribeResult(
             subscription_id=subscription_id,
-            product_deleted=product_deleted,
-            message=(
-                "Product removed and deleted from catalog (no remaining watchers)."
-                if product_deleted
-                else "Product removed from your tracking list."
-            ),
+            product_deleted=False,
+            message="Product removed from your tracking list.",
         )

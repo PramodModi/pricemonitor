@@ -1,5 +1,4 @@
 import queue
-import threading
 import time
 from typing import Optional
 
@@ -45,10 +44,13 @@ class EmailWorker:
             try:
                 self._process_notification(job)
             except Exception as exc:
+                # FIX (DEV-006): was logger.error(..., product_id=..., error=...)
+                # keyword args raise TypeError on standard logging.Logger,
+                # which was itself swallowed — making every failure invisible.
                 logger.error(
-                    "Unhandled exception in EmailWorker",
-                    product_id=str(job.product_id),
-                    error=str(exc),
+                    f"Unhandled exception in EmailWorker — "
+                    f"product_id={str(job.product_id)} "
+                    f"error={str(exc)}"
                 )
             finally:
                 self.email_queue.task_done()
@@ -67,10 +69,11 @@ class EmailWorker:
             nl_repo = NotificationLogRepository(db)
 
             emails = sub_repo.get_subscriber_emails_for_product(job.product_id)
+            # FIX (DEV-006): was logger.info(..., product_id=..., subscriber_count=...)
             logger.info(
-                "Dispatching price drop notifications",
-                product_id=str(job.product_id),
-                subscriber_count=len(emails),
+                f"Dispatching price drop notifications — "
+                f"product_id={str(job.product_id)} "
+                f"subscriber_count={len(emails)}"
             )
 
             emails_sent = 0
@@ -92,19 +95,21 @@ class EmailWorker:
                     emails_sent += 1
 
             db.commit()
+            # FIX (DEV-006): was logger.info(..., product_id=..., emails_sent=..., ...)
             logger.info(
-                "Notification fan-out complete",
-                product_id=str(job.product_id),
-                emails_sent=emails_sent,
-                total_subscribers=len(emails),
+                f"Notification fan-out complete — "
+                f"product_id={str(job.product_id)} "
+                f"emails_sent={emails_sent} "
+                f"total_subscribers={len(emails)}"
             )
 
         except Exception as exc:
             db.rollback()
+            # FIX (DEV-006): was logger.error(..., product_id=..., error=...)
             logger.error(
-                "DB error during notification fan-out",
-                product_id=str(job.product_id),
-                error=str(exc),
+                f"DB error during notification fan-out — "
+                f"product_id={str(job.product_id)} "
+                f"error={str(exc)}"
             )
         finally:
             db.close()
@@ -128,21 +133,28 @@ class EmailWorker:
                 return "sent"
 
             backoff = 2 ** attempt
+            # FIX (DEV-006): was logger.warning(..., to_email=..., attempt=..., ...)
             logger.warning(
-                "Email delivery failed, retrying",
-                to_email=to_email,
-                attempt=attempt,
-                backoff_seconds=backoff,
+                f"Email delivery failed, retrying — "
+                f"to_email={to_email} "
+                f"attempt={attempt} "
+                f"backoff_seconds={backoff}"
             )
             time.sleep(backoff)
 
+        # FIX (DEV-006): was logger.error(..., to_email=..., product_id=...)
         logger.error(
-            "Email delivery permanently failed",
-            to_email=to_email,
-            product_id=str(job.product_id),
+            f"Email delivery permanently failed — "
+            f"to_email={to_email} "
+            f"product_id={str(job.product_id)}"
         )
         return "failed"
 
     @staticmethod
     def _infer_platform(url: str) -> str:
-        return "amazon" if "amazon.in" in url else "flipkart"
+        # FIX: was binary amazon/flipkart — Myntra URLs were misidentified as flipkart
+        if "amazon.in" in url:
+            return "amazon"
+        if "myntra.com" in url:
+            return "myntra"
+        return "flipkart"
