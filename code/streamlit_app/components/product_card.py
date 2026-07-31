@@ -91,10 +91,20 @@ def render_product_card(item: dict) -> None:
         price_block += f'<div class="product-meta">{meta_str}</div>'
 
     html = template
+    product_url = product.get("url", "")
+    if product_url:
+        platform_label_html = (
+            f'<a href="{product_url}" target="_blank" '
+            f'style="color:inherit;text-decoration:none;">'
+            f'{platform_label} ↗</a>'
+        )
+    else:
+        platform_label_html = platform_label
+
     html = html.replace("{image_block}", image_block)
     html = html.replace("{product_name}", product.get("name", "Loading..."))
     html = html.replace("{platform_icon}", platform_icon)
-    html = html.replace("{platform_label}", platform_label)
+    html = html.replace("{platform_label}", platform_label_html)
     html = html.replace("{availability_class}", availability_class)
     html = html.replace("{availability_text}", availability_text)
     html = html.replace("{price_block}", price_block)
