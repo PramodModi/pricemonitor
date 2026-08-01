@@ -46,6 +46,7 @@ class PreviewResponse(BaseModel):
     preview_id: uuid.UUID
     expires_at: datetime
     is_new_product: bool
+    data_source: str          # "database" | "live_scrape"
     live_data: LiveData
     catalog_data: Optional[CatalogData] = None
 

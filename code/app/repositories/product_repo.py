@@ -65,6 +65,12 @@ class ProductRepository:
         self.db.flush()
         return product
 
+    def update_url(self, product: Product, new_url: str) -> Product:
+        """Overwrite the stored URL — used to backfill affiliate tags."""
+        product.url = new_url
+        self.db.flush()
+        return product
+
     def get_all_for_scraping(self) -> list[Product]:
         return list(
             self.db.scalars(

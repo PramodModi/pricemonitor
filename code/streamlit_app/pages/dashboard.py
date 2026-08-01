@@ -9,12 +9,13 @@ from components.empty_state import render_empty_state
 
 def init_session_state():
     defaults = {
-        "user_email": None,
-        "track_step": "input",
-        "preview_result": None,
-        "delete_confirm": None,
-        "view_product_id": None,
+        "user_email":         None,
+        "track_step":         "input",
+        "preview_result":     None,
+        "delete_confirm":     None,
+        "view_product_id":    None,
         "navigate_to_product": False,
+        "force_items_reload": False,   # set True by product_card 🔄 button
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -23,7 +24,7 @@ def init_session_state():
 
 init_session_state()
 
-# ── Check if we need to navigate to product page ──────────────────
+# ── Navigate to product page if triggered from a card ─────────────────────────
 if st.session_state.navigate_to_product and st.session_state.view_product_id:
     st.session_state.navigate_to_product = False
     st.switch_page("pages/product.py")
@@ -43,14 +44,20 @@ with st.container(border=True):
         view_clicked = st.button("View →", use_container_width=True, type="primary")
 
 if view_clicked and email_input:
-    st.session_state.user_email = email_input.strip().lower()
+    st.session_state.user_email       = email_input.strip().lower()
+    st.session_state.force_items_reload = True   # new email → always re-fetch
 
 if not st.session_state.user_email:
     st.info("Enter your email above to see your tracked products.")
     st.stop()
 
+# ── Load items — re-fetch when force_items_reload is set ─────────────────────
+# force_items_reload is set by the 🔄 button on any product card so the full
+# list reflects the latest DB data after a refresh.
 with st.spinner("Loading your items..."):
     result = get_items(st.session_state.user_email)
+
+st.session_state.force_items_reload = False   # clear after every fetch
 
 if not result.ok:
     st.error(f"Could not load items: {result.error_message}")
@@ -63,7 +70,7 @@ st.caption(
     f"for **{st.session_state.user_email}**"
 )
 
-# Delete confirmation dialog
+# ── Delete confirmation ───────────────────────────────────────────────────────
 if st.session_state.delete_confirm:
     pending = st.session_state.delete_confirm
     with st.container(border=True):
@@ -86,6 +93,7 @@ if st.session_state.delete_confirm:
                 st.session_state.delete_confirm = None
                 st.rerun()
 
+# ── Empty state ───────────────────────────────────────────────────────────────
 if count == 0:
     render_empty_state()
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -97,10 +105,7 @@ if count == 0:
         ):
             st.switch_page("pages/track.py")
     st.stop()
-# Navigate to product page if view button was clicked
-if st.session_state.get("view_product_id") and st.session_state.get("navigate_to_product"):
-    st.session_state.navigate_to_product = False
-    st.switch_page("pages/product.py")
 
+# ── Product cards ─────────────────────────────────────────────────────────────
 for item in items:
     render_product_card(item)

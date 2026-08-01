@@ -2,21 +2,22 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import streamlit as st
-from api_client import preview_product, confirm_subscription
+from api_client import preview_product, confirm_subscription, get_items
 from components.preview_card import render_preview_card
 
 
 def init_session_state():
     defaults = {
-        "user_email": None,
-        "track_step": "input",
-        "preview_result": None,
-        "delete_confirm": None,
+        "user_email":      None,
+        "track_step":      "input",
+        "preview_result":  None,
+        "delete_confirm":  None,
         "view_product_id": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
 
 def _show_preview_error(code: str, message: str) -> None:
     if code == "INVALID_URL":
@@ -64,6 +65,28 @@ def _show_confirm_error(code: str, message: str) -> None:
         st.error(f"Could not complete tracking: {message}")
 
 
+def _is_already_tracking(email: str, product_id: str) -> bool:
+    """
+    Check whether the given email is already tracking this product.
+    Calls GET /items — lightweight, read-only.
+    Returns False on any error so the flow is never blocked.
+    """
+    if not email or not product_id:
+        return False
+    try:
+        result = get_items(email)
+        if not result.ok:
+            return False
+        items = result.data.get("items", [])
+        tracked_ids = {
+            str(item["product"].get("product_id", ""))
+            for item in items
+        }
+        return str(product_id) in tracked_ids
+    except Exception:
+        return False
+
+
 init_session_state()
 
 st.title("➕ Track New Item")
@@ -86,14 +109,14 @@ if st.session_state.track_step == "input":
             use_container_width=True,
         )
 
-    st.caption("✅ Supported: Amazon India·Flipkart . Myntra")
+    st.caption("✅ Supported: Amazon India · Flipkart · Myntra")
 
     if submitted:
         if not url.strip():
             st.error("Please enter a product URL.")
             st.stop()
 
-        with st.spinner("Fetching live product details — this may take up to 30 seconds..."):
+        with st.spinner("Fetching product details..."):
             result = preview_product(url.strip())
 
         if result.ok:
@@ -114,37 +137,53 @@ elif st.session_state.track_step == "preview":
     render_preview_card(preview)
 
     email = st.text_input(
-        "📧 Your email — we'll notify you here when the price changes",
+        "📧 Your email — we'll notify you when the price drops",
         value=st.session_state.user_email or "",
         placeholder="you@example.com",
     )
 
+    # ── Already-tracking check ────────────────────────────────────────────────
+    # Resolve product_id from catalog_data (present when product is in DB).
+    # For brand-new products catalog_data is None — already_tracking stays False.
+    catalog   = preview.get("catalog_data") or {}
+    product_id = str(catalog.get("product_id", ""))
+
+    already_tracking = False
+    if email.strip() and "@" in email and product_id:
+        already_tracking = _is_already_tracking(email.strip().lower(), product_id)
+
     col1, col2 = st.columns(2)
+
     with col1:
         if st.button("← Try a different URL", use_container_width=True):
             st.session_state.track_step = "input"
             st.session_state.preview_result = None
             st.rerun()
+
     with col2:
-        if st.button("✅ Yes, track it", type="primary", use_container_width=True):
-            if not email.strip() or "@" not in email:
-                st.error("Please enter a valid email address.")
-                st.stop()
+        if already_tracking:
+            # Show informative message in place of the Track button
+            st.info("✅ Already in your tracking list.", icon=None)
+        else:
+            if st.button("✅ Yes, track it", type="primary", use_container_width=True):
+                if not email.strip() or "@" not in email:
+                    st.error("Please enter a valid email address.")
+                    st.stop()
 
-            with st.spinner("Setting up tracking..."):
-                result = confirm_subscription(
-                    preview["preview_id"],
-                    email.strip().lower(),
-                )
+                with st.spinner("Setting up tracking..."):
+                    result = confirm_subscription(
+                        preview["preview_id"],
+                        email.strip().lower(),
+                    )
 
-            if result.ok:
-                st.session_state.user_email = email.strip().lower()
-                st.session_state.view_product_id = result.data["product"]["product_id"]
-                st.session_state.track_step = "success"
-                st.session_state.preview_result = None
-                st.rerun()
-            else:
-                _show_confirm_error(result.error_code, result.error_message)
+                if result.ok:
+                    st.session_state.user_email    = email.strip().lower()
+                    st.session_state.view_product_id = result.data["product"]["product_id"]
+                    st.session_state.track_step    = "success"
+                    st.session_state.preview_result = None
+                    st.rerun()
+                else:
+                    _show_confirm_error(result.error_code, result.error_message)
 
 # ── STATE: success ────────────────────────────────────────────────────────────
 elif st.session_state.track_step == "success":
@@ -178,5 +217,3 @@ elif st.session_state.track_step == "success":
             ):
                 st.session_state.track_step = "input"
                 st.switch_page("pages/dashboard.py")
-
-

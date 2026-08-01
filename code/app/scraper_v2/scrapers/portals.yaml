@@ -47,6 +47,7 @@ portals:
   flipkart:
     domains:
       - flipkart.com
+      - dl.flipkart.com    # deep link domain — used for app + web affiliate tracking
     product_id_pattern: "/p/([a-zA-Z0-9]+)"
     affiliate_api: false
     goto_wait_until: domcontentloaded

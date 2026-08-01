@@ -27,6 +27,7 @@ SUPPORTED_DOMAINS = {
     "amzn.in": "amazon",
     "flipkart.com": "flipkart",
     "www.flipkart.com": "flipkart",
+    "dl.flipkart.com": "flipkart",      # deep link domain
     "myntra.com": "myntra",
     "www.myntra.com": "myntra",
 }
@@ -79,13 +80,13 @@ class URLValidator:
             marketplace_product_id = self._extract_product_id(
                 platform, parsed.path, raw_url
             )
-            
+
             # For Amazon, always reconstruct a clean /dp/ URL
             if platform == "amazon" and marketplace_product_id:
                 canonical_url = f"https://www.amazon.in/dp/{marketplace_product_id}"
             else:
                 canonical_url = self._canonicalise(platform, parsed)
-            
+
             return ValidatedURL(
                 platform=platform,
                 canonical_url=canonical_url,
@@ -100,7 +101,7 @@ class URLValidator:
             if reconstructed:
                 return ValidatedURL(
                     platform=platform,
-                    canonical_url=reconstructed,  # use clean /dp/ URL
+                    canonical_url=reconstructed,
                     marketplace_product_id=reconstructed.split("/dp/")[1].split("/")[0],
                 )
 
@@ -126,9 +127,9 @@ class URLValidator:
         )
 
     def _canonicalise(self, platform: str, parsed) -> str:
-        strip_params = (
-            _AMAZON_STRIP_PARAMS if platform == "amazon" else _FLIPKART_STRIP_PARAMS
-        )
+        if platform == "flipkart":
+            return self._canonicalise_flipkart(parsed)
+        strip_params = _AMAZON_STRIP_PARAMS
         query_params = parse_qs(parsed.query, keep_blank_values=False)
         clean_params = {k: v for k, v in query_params.items() if k not in strip_params}
         clean_query = urlencode(clean_params, doseq=True)
@@ -140,19 +141,50 @@ class URLValidator:
             clean_query,
             "",
         ))
-    
+
+    def _canonicalise_flipkart(self, parsed) -> str:
+        """
+        Rewrite any Flipkart URL to the deep link format for app + web tracking.
+
+        www.flipkart.com/a/b  →  https://dl.flipkart.com/dl/a/b
+        dl.flipkart.com/dl/a/b  →  https://dl.flipkart.com/dl/a/b  (already correct)
+
+        Affiliate params (affid, affExtParam1, affExtParam2, otracker) are stripped
+        here — product_sync.py re-appends them with the configured affiliate ID.
+        Legitimate params like pid= are preserved.
+        """
+        # Build the deep link path
+        if parsed.netloc == "dl.flipkart.com":
+            # Already a deep link — path is already /dl/...
+            deep_path = parsed.path
+        else:
+            # www.flipkart.com — prepend /dl
+            deep_path = "/dl" + parsed.path
+
+        # Strip affiliate/tracker params, keep everything else (e.g. pid=)
+        query_params = parse_qs(parsed.query, keep_blank_values=False)
+        clean_params = {k: v for k, v in query_params.items() if k not in _FLIPKART_STRIP_PARAMS}
+        clean_query = urlencode(clean_params, doseq=True)
+
+        return urlunparse((
+            "https",
+            "dl.flipkart.com",
+            deep_path,
+            "",
+            clean_query,
+            "",
+        ))
+
     def _reconstruct_amazon_url(self, raw_url: str) -> Optional[str]:
         """
         Try to extract ASIN from any Amazon URL and reconstruct a clean /dp/ URL.
         Handles /gp/product/, /dp/, cart links, image links etc.
         """
-        # Try all known ASIN patterns
         asin_patterns = [
             re.compile(r"/dp/([A-Z0-9]{10})"),
             re.compile(r"/gp/product/([A-Z0-9]{10})"),
             re.compile(r"/product/([A-Z0-9]{10})"),
             re.compile(r"[&?]asin=([A-Z0-9]{10})"),
-            # ASIN as a standalone path segment
             re.compile(r"/([A-Z0-9]{10})(?:[/?]|$)"),
         ]
 

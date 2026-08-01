@@ -33,6 +33,40 @@ _amazon_scraper = AmazonScraper()
 _flipkart_scraper = FlipkartScraper()
 
 
+def _build_catalog_data(existing, product_repo: ProductRepository, live_price=None) -> CatalogData:
+    """
+    Build CatalogData from an existing Product ORM row.
+    live_price is used to compute the price_change_indicator when provided
+    (Path B — live scrape). For Path A (DB-first), live_price is None and
+    the indicator is omitted.
+    """
+    watcher_count = product_repo.get_watcher_count(existing.product_id)
+    price_stats_raw = product_repo.get_price_stats(existing.product_id)
+
+    price_change_indicator = None
+    price_change_amount = None
+
+    if live_price is not None and existing.current_price is not None:
+        if live_price < existing.current_price:
+            price_change_indicator = "down"
+            price_change_amount = existing.current_price - live_price
+        elif live_price > existing.current_price:
+            price_change_indicator = "up"
+            price_change_amount = live_price - existing.current_price
+        else:
+            price_change_indicator = "unchanged"
+
+    return CatalogData(
+        product_id=existing.product_id,
+        last_tracked_price=existing.current_price,
+        price_change_indicator=price_change_indicator,
+        price_change_amount=price_change_amount,
+        last_checked_at=existing.last_checked_at,
+        watcher_count=watcher_count,
+        price_stats=PriceStats(**price_stats_raw) if price_stats_raw else None,
+    )
+
+
 @router.post(
     "/preview",
     response_model=PreviewResponse,
@@ -43,14 +77,25 @@ def preview_product(
     db: Session = Depends(get_db),
 ) -> PreviewResponse:
     """
-    Validate URL, scrape live data, look up existing catalog context,
-    and return a preview token valid for 10 minutes.
+    Validate URL and return a preview token valid for 10 minutes.
+
+    PATH A — known product (URL already in catalog):
+        Return DB data immediately. No scrape. data_source = "database".
+
+    PATH B — new product (URL not in catalog):
+        Run a live scrape, return scraped data. data_source = "live_scrape".
+        Unchanged from pre-v2.8 behaviour.
+
     No database writes occur at this step.
     """
-    # Step 1 — validate URL
+    # ── Step 1 — validate URL ─────────────────────────────────────────────────
     try:
         validated = url_validator.validate(body.url)
-        logger.info(f"Validated URL — canonical={validated.canonical_url}, platform={validated.platform}, id={validated.marketplace_product_id}")
+        logger.info(
+            f"Validated URL — canonical={validated.canonical_url} "
+            f"platform={validated.platform} "
+            f"id={validated.marketplace_product_id}"
+        )
     except InvalidURLError as exc:
         raise HTTPException(
             status_code=400,
@@ -69,7 +114,71 @@ def preview_product(
             },
         )
 
-    # Step 2 — live scrape
+    # ── Step 2 — DB lookup FIRST ──────────────────────────────────────────────
+    product_repo = ProductRepository(db)
+    existing = None
+    if validated.marketplace_product_id:
+        existing = product_repo.get_by_platform_and_marketplace_id(
+            validated.platform,
+            validated.marketplace_product_id,
+        )
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PATH A — known product: serve from DB immediately, no scrape
+    # ═════════════════════════════════════════════════════════════════════════
+    if existing is not None:
+        logger.info(
+            f"Preview PATH A (DB hit) — product_id={existing.product_id} "
+            f"platform={existing.platform}"
+        )
+
+        live_data = LiveData(
+            marketplace_product_id=existing.marketplace_product_id,
+            url=existing.url,
+            platform=existing.platform,
+            name=existing.name or "",
+            brand=existing.brand,
+            image_url=existing.image_url,
+            current_price=existing.current_price,
+            currency=existing.currency or "INR",
+            availability=existing.availability if existing.availability is not None else False,
+            rating=existing.rating,
+            review_count=existing.review_count,
+            seller=existing.seller,
+            scraped_at=existing.last_checked_at or datetime.now(timezone.utc),
+        )
+
+        catalog_data = _build_catalog_data(existing, product_repo, live_price=None)
+
+        preview_id = uuid.uuid4()
+        expires_at = preview_cache.make_expires_at()
+
+        snapshot = ProductSnapshot(
+            preview_id=preview_id,
+            expires_at=expires_at,
+            is_new_product=False,
+            live_data=live_data.model_dump(),
+            catalog_data=catalog_data.model_dump() if catalog_data else None,
+        )
+        preview_cache.store(snapshot)
+
+        return PreviewResponse(
+            preview_id=preview_id,
+            expires_at=expires_at,
+            is_new_product=False,
+            data_source="database",
+            live_data=live_data,
+            catalog_data=catalog_data,
+        )
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PATH B — new product: live scrape (unchanged from pre-v2.8)
+    # ═════════════════════════════════════════════════════════════════════════
+    logger.info(
+        f"Preview PATH B (DB miss, live scrape) — url={validated.canonical_url} "
+        f"platform={validated.platform}"
+    )
+
     try:
         if settings.use_scraper_v2:
             with ScraperEngine() as engine:
@@ -94,9 +203,13 @@ def preview_product(
                     url=validated.canonical_url,
                     status=diag_status,
                     trigger="preview",
-                    triggered_by=None,  # email not available at preview step
+                    triggered_by=None,
                     extraction_method=result.extraction_method,
-                    error_type=result.error_type.value if hasattr(result.error_type, "value") else result.error_type,
+                    error_type=(
+                        result.error_type.value
+                        if hasattr(result.error_type, "value")
+                        else result.error_type
+                    ),
                     error_message=result.error_message,
                     layers_attempted=result.layers_attempted or None,
                     layers_failed=result.layers_failed or None,
@@ -152,9 +265,9 @@ def preview_product(
                     browser.close()
 
     except HTTPException:
-        raise  # re-raise scrape_failed from v2 path
+        raise
     except ScrapeBotDetectedError as exc:
-        logger.error(f"Bot detected — url={validated.canonical_url}, error={str(exc)}")
+        logger.error(f"Bot detected — url={validated.canonical_url} error={str(exc)}")
         raise HTTPException(
             status_code=502,
             detail={
@@ -163,7 +276,7 @@ def preview_product(
             },
         )
     except ScrapeError as exc:
-        logger.error(f"Scrape failed — url={validated.canonical_url}, error={str(exc)}")
+        logger.error(f"Scrape failed — url={validated.canonical_url} error={str(exc)}")
         raise HTTPException(
             status_code=502,
             detail={
@@ -172,7 +285,7 @@ def preview_product(
             },
         )
     except Exception as exc:
-        logger.error(f"Unexpected error — url={validated.canonical_url}, error={str(exc)}")
+        logger.error(f"Unexpected error — url={validated.canonical_url} error={str(exc)}")
         raise HTTPException(
             status_code=500,
             detail={
@@ -180,7 +293,8 @@ def preview_product(
                 "message": "Something went wrong.",
             },
         )
-    # Step 3 — assemble live_data
+
+    # Step 3 — assemble live_data from scrape result
     marketplace_product_id = (
         result.marketplace_product_id or validated.marketplace_product_id
     )
@@ -202,41 +316,23 @@ def preview_product(
         scraped_at=scraped_at,
     )
 
-    # Step 4 — DB lookup (read-only)
-    product_repo = ProductRepository(db)
-    existing = product_repo.get_by_platform_and_marketplace_id(
-        validated.platform, marketplace_product_id
-    )
+    # Step 4 — DB lookup after scrape (will be None — already checked above)
+    # Re-check using ASIN resolved from scrape (handles amzn.in short URLs
+    # where marketplace_product_id was empty at validation time)
+    existing_after_scrape = None
+    if marketplace_product_id and marketplace_product_id != validated.marketplace_product_id:
+        existing_after_scrape = product_repo.get_by_platform_and_marketplace_id(
+            validated.platform, marketplace_product_id
+        )
 
     catalog_data = None
-    is_new_product = existing is None
+    is_new_product = existing_after_scrape is None
 
-    if existing:
-        watcher_count = product_repo.get_watcher_count(existing.product_id)
-        price_stats_raw = product_repo.get_price_stats(existing.product_id)
-
-        price_change_indicator = None
-        price_change_amount = None
-
-        if existing.current_price is not None:
-            if result.current_price < existing.current_price:
-                price_change_indicator = "down"
-                price_change_amount = existing.current_price - result.current_price
-            elif result.current_price > existing.current_price:
-                price_change_indicator = "up"
-                price_change_amount = result.current_price - existing.current_price
-            else:
-                price_change_indicator = "unchanged"
-
-        catalog_data = CatalogData(
-            product_id=existing.product_id,
-            last_tracked_price=existing.current_price,
-            price_change_indicator=price_change_indicator,
-            price_change_amount=price_change_amount,
-            last_checked_at=existing.last_checked_at,
-            watcher_count=watcher_count,
-            price_stats=PriceStats(**price_stats_raw) if price_stats_raw else None,
+    if existing_after_scrape:
+        catalog_data = _build_catalog_data(
+            existing_after_scrape, product_repo, live_price=result.current_price
         )
+    # (normal Path B with no ASIN redirect: existing is None, catalog_data stays None)
 
     # Step 5 — cache snapshot
     preview_id = uuid.uuid4()
@@ -255,6 +351,7 @@ def preview_product(
         preview_id=preview_id,
         expires_at=expires_at,
         is_new_product=is_new_product,
+        data_source="live_scrape",
         live_data=live_data,
         catalog_data=catalog_data,
     )
@@ -271,6 +368,7 @@ def get_product(
     """
     Retrieve full product details including watcher count, price stats,
     and price history for the chart.
+    Used by all Refresh buttons — pure DB read, no scraping.
     """
     product_repo = ProductRepository(db)
     product = product_repo.get_by_id(product_id)

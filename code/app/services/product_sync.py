@@ -15,14 +15,24 @@ logger = get_logger(__name__)
 
 
 def _build_affiliated_url(url: str, platform: str) -> str:
-    """Append affiliate tag to URL before storing in DB."""
+    """
+    Append affiliate tag to URL before storing in DB.
+
+    Amazon: appends ?tag= or &tag=
+    Flipkart: appends affid= and affExtParam1= (both required for app + web
+              tracking). The URL is already in deep link format
+              (dl.flipkart.com/dl/...) by the time it arrives here —
+              url_validator._canonicalise_flipkart() rewrites it upstream.
+    """
     if platform == "amazon" and app_settings.amazon_affiliate_tag:
         separator = "&" if "?" in url else "?"
         return f"{url}{separator}tag={app_settings.amazon_affiliate_tag}"
     if platform == "flipkart" and app_settings.flipkart_affiliate_id:
+        affid = app_settings.flipkart_affiliate_id
         separator = "&" if "?" in url else "?"
-        return f"{url}{separator}affid={app_settings.flipkart_affiliate_id}"
+        return f"{url}{separator}affid={affid}&affExtParam1={affid}"
     return url
+
 
 class SyncResult:
     def __init__(
@@ -83,10 +93,10 @@ class ProductSyncService:
         price_updated = False
 
         if product is None:
-            platform=live["platform"]
-            marketplace_product_id=live["marketplace_product_id"]
+            platform = live["platform"]
+            marketplace_product_id = live["marketplace_product_id"]
             logger.info(
-                f"Creating new product, platform={platform} "
+                f"Creating new product — platform={platform} "
                 f"marketplace_product_id={marketplace_product_id}"
             )
             affiliated_url = _build_affiliated_url(live["url"], live["platform"])
@@ -114,7 +124,7 @@ class ProductSyncService:
 
         else:
             logger.info(
-                f"Updating existing product metadata,"
+                f"Updating existing product metadata — "
                 f"product_id={str(product.product_id)}"
             )
             # Step 2a — refresh mutable metadata from the live scrape.
@@ -131,6 +141,14 @@ class ProductSyncService:
                     "last_checked_at": live.get("scraped_at"),
                 },
             )
+
+            # Step 2b — backfill affiliate URL if not already present.
+            affiliated_url = _build_affiliated_url(live["url"], live["platform"])
+            if affiliated_url != product.url:
+                self.product_repo.update_url(product, affiliated_url)
+                logger.info(
+                    f"Backfilled affiliate URL — product_id={str(product.product_id)}"
+                )
 
             # Step 3 — price comparison and history write.
             live_price = live.get("current_price")
