@@ -46,6 +46,7 @@ def render_product_card(item: dict) -> None:
     availability               = product.get("availability")
     avail_text                 = "✅ In Stock" if availability else "❌ Out of Stock"
     price                      = product.get("current_price")
+    special_price              = product.get("special_price")
     rating                     = product.get("rating")
     review_count               = product.get("review_count")
     product_url                = product.get("url", "")
@@ -94,6 +95,14 @@ def render_product_card(item: dict) -> None:
                 f'margin:4px 0 2px;">{_format_price(price)}</div>',
                 unsafe_allow_html=True,
             )
+
+            # Offer price — shown only when present and lower than current_price
+            if special_price and price and float(special_price) < float(price):
+                st.markdown(
+                    f'<div style="font-size:18px;font-weight:700;color:#2563EB;'
+                    f'margin:2px 0 4px;">🏷️ With offer: ₹{float(special_price):,.0f}</div>',
+                    unsafe_allow_html=True,
+                )
 
             # Rating + review count
             meta_parts = []

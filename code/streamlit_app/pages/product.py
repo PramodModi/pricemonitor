@@ -128,7 +128,8 @@ with col_info:
         # Special price row — only when lower than selling price
         if special_price and float(special_price) < float(current_price):
             st.markdown(
-                f"<p style='font-size:0.85em;color:#2563eb;margin:0 0 4px;'>"
+                
+                f"<p style='font-size:18px;font-weight:700;color:#2563EB;margin:0 0 4px;'>"
                 f"💰 Offer price: <strong>₹{float(special_price):,.0f}</strong>"
                 f"</p>",
                 unsafe_allow_html=True,
@@ -193,13 +194,35 @@ if stats:
     history = p.get("price_history", [])
     if len(history) >= 2:
         import pandas as pd
+        import altair as alt
         with st.spinner("Loading price chart..."):
             df = pd.DataFrame(history)
-            df["checked_at"] = pd.to_datetime(df["checked_at"])
+            df["checked_at"] = pd.to_datetime(df["checked_at"], utc=True)
             df["price"]      = df["price"].astype(float)
-            df["date"]       = df["checked_at"].dt.strftime("%-d %b")
+            df = df.sort_values("checked_at")
 
-        st.line_chart(df, x="date", y="price", y_label="Price (₹)", x_label="Date")
+        chart = (
+            alt.Chart(df)
+            .mark_line(point=True, color="#2563eb")
+            .encode(
+                x=alt.X(
+                    "checked_at:T",
+                    title="Date",
+                    axis=alt.Axis(format="%d %b", labelAngle=-45),
+                ),
+                y=alt.Y(
+                    "price:Q",
+                    title="Price (₹)",
+                    scale=alt.Scale(zero=False),
+                ),
+                tooltip=[
+                    alt.Tooltip("checked_at:T", title="Date", format="%d %b %Y, %I:%M %p"),
+                    alt.Tooltip("price:Q",      title="Price (₹)", format=",.0f"),
+                ],
+            )
+            .properties(width="container", height=350)
+        )
+        st.altair_chart(chart, use_container_width=True)
     elif len(history) == 1:
         st.caption(
             "Only one data point so far — chart will appear after the next scrape run."
