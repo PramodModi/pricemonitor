@@ -24,6 +24,16 @@ class LiveData(BaseModel):
     seller: Optional[str] = None
     scraped_at: datetime
 
+    # ── Affiliate API enrichment (present only when source=affiliate_api) ─────
+    # All default to None / empty — UI must check before rendering.
+    # Populated for Flipkart via affiliate API; None for Amazon, Myntra,
+    # and any browser-scraped result today. Will auto-show when future
+    # platforms provide this data.
+    mrp: Optional[Decimal] = None
+    special_price: Optional[Decimal] = None
+    discount_pct: Optional[float] = None
+    offers: Optional[list[str]] = []
+
 
 class PriceStats(BaseModel):
     all_time_low: Decimal
@@ -76,7 +86,21 @@ class ProductOut(BaseModel):
     price_stats: Optional[PriceStats] = None
     price_history: list[PricePoint] = []
 
+    # ── Affiliate API enrichment (same as LiveData — None when not available) ─
+    mrp: Optional[Decimal] = None
+    special_price: Optional[Decimal] = None
+    discount_pct: Optional[float] = None
+    offers: Optional[list[str]] = []
+
     model_config = {"from_attributes": True}
+
+    @field_validator("offers", mode="before")
+    @classmethod
+    def coerce_offers(cls, v: object) -> list:
+        """Coerce NULL from DB (None) to empty list."""
+        if v is None:
+            return []
+        return v
 
     @field_validator("price_history", mode="before")
     @classmethod

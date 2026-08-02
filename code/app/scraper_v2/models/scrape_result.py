@@ -62,6 +62,19 @@ class ScrapeResponse:
     seller: Optional[str] = None
     currency: str = "INR"
 
+    # ── Affiliate API enrichment fields (Flipkart only for now) ───────────────
+    # Populated when extraction_method='affiliate_api'.
+    # None for Amazon, Myntra, and any browser-scraped result.
+    # Displayed in the UI only when non-None — no empty sections shown.
+    mrp: Optional[Decimal] = None
+    """Maximum Retail Price (printed price before discount)."""
+    special_price: Optional[Decimal] = None
+    """Price after bank/card/extra offers (flipkartSpecialPrice)."""
+    discount_pct: Optional[float] = None
+    """Discount percentage off MRP (e.g. 23.0 = 23% off)."""
+    offers: list[str] = field(default_factory=list)
+    """Raw promotional offer strings (bank cashback, card offers, etc.)."""
+
     # ── Diagnostics (always populated) ────────────────────────────────────────
     portal: str = ""
     extraction_method: Optional[str] = None   # which layer found the price

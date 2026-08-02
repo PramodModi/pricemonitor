@@ -71,6 +71,31 @@ class ProductRepository:
         self.db.flush()
         return product
 
+    def update_affiliate_data(
+        self,
+        product: Product,
+        mrp: Optional[Decimal],
+        special_price: Optional[Decimal],
+        discount_pct: Optional[float],
+        offers: list[str],
+    ) -> Product:
+        """
+        Persist affiliate API enrichment fields to the products row.
+        Called after every successful affiliate API fetch — cron and preview.
+        Only updates when values are non-None so browser-scraped results
+        (which pass None) never overwrite previously stored affiliate data.
+        """
+        if mrp is not None:
+            product.mrp = mrp
+        if special_price is not None:
+            product.special_price = special_price
+        if discount_pct is not None:
+            product.discount_pct = discount_pct
+        if offers:
+            product.offers = offers
+        self.db.flush()
+        return product
+
     def get_all_for_scraping(self) -> list[Product]:
         return list(
             self.db.scalars(

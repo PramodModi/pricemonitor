@@ -10,6 +10,7 @@ Update alembic.ini
 
 Run Fastapi: python -m uvicorn app.fastapi.main:app --reload --port 8001
 Run streamlit: python -m streamlit run streamlit_app/app.py
+Run scraper: python -m scraper_entrypoint
 
 Deployment on Railway:
 Create new project and give Github repository pricemonitor link

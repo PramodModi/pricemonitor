@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import Boolean, Integer, Numeric, String, Text, TIMESTAMP, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -42,6 +42,16 @@ class Product(Base):
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )
+
+    # ── Affiliate API enrichment ───────────────────────────────────────────────
+    # Populated for Flipkart when extraction_method='affiliate_api'.
+    # NULL for Amazon, Myntra, and browser-scraped results.
+    # Written by scraper_worker._write_result() and preview endpoint.
+    mrp: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
+    special_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
+    discount_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    offers: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text()), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )

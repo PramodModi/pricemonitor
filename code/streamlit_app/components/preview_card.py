@@ -11,18 +11,20 @@ def _format_price(price: Optional[float]) -> str:
     except (ValueError, TypeError):
         return "N/A"
 
-
 def _format_last_fetched(ts: Optional[str]) -> str:
     """
-    Format a UTC ISO timestamp as an absolute date+time string.
-    e.g. "2026-07-30T06:00:00Z" → "30 Jul, 6:00 AM"
+    Format a UTC ISO timestamp as an absolute date+time string in IST (UTC+5:30).
+    e.g. "2026-07-30T06:00:00Z" → "30 Jul, 11:30 AM"
     Returns "Never fetched" when ts is None.
     """
-    if not ts:
+    if ts is None:
         return "Never fetched"
     try:
+        from datetime import timezone, timedelta
+        IST = timezone(timedelta(hours=5, minutes=30))
         dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-        return dt.strftime("%-d %b, %-I:%M %p")
+        dt_ist = dt.astimezone(IST)
+        return dt_ist.strftime("%-d %b, %-I:%M %p")
     except Exception:
         return str(ts)
 
@@ -39,6 +41,25 @@ def _format_date(iso: str) -> str:
 def render_preview_card(preview: dict) -> None:
     live    = preview["live_data"]
     catalog = preview.get("catalog_data")
+
+    # ── DEBUG: log all live_data fields received in Streamlit ─────────────────
+    import logging
+    _log = logging.getLogger(__name__)
+    _log.info(
+        f"[PREVIEW_CARD][debug] live_data keys={list(live.keys())} "
+        f"current_price={live.get('current_price')} "
+        f"mrp={live.get('mrp')} "
+        f"special_price={live.get('special_price')} "
+        f"discount_pct={live.get('discount_pct')} "
+        f"offers_count={len(live.get('offers') or [])} "
+        f"offers_preview={list(live.get('offers') or [])[:2]}"
+    )
+
+    # Enrichment fields — present for Flipkart affiliate API, None otherwise
+    mrp          = live.get("mrp")
+    special_price = live.get("special_price")
+    discount_pct  = live.get("discount_pct")
+    offers        = live.get("offers") or []
 
     PLATFORM_DISPLAY = {
         "amazon":   ("Amazon India", "🛒"),
@@ -96,11 +117,48 @@ def render_preview_card(preview: dict) -> None:
             # next to it, spacer fills the rest so button doesn't stretch right.
             col_price, col_btn, col_space = st.columns([3, 1, 2])
             with col_price:
+                # ── Selling price + MRP + discount badge ──────────────────────
+                # MRP shown with strikethrough only when different from price.
+                # Discount badge shown when discount_pct present and > 0.
+                # Special price shown when lower than selling price.
+                # All enrichment rows hidden for Amazon/Myntra (fields are None).
+
+                price_html_parts = [
+                    f'<span style="font-size:28px;font-weight:700;color:#16a34a;">'
+                    f'{_format_price(live_price)}</span>'
+                ]
+
+                if mrp and live_price and float(mrp) != float(live_price):
+                    price_html_parts.append(
+                        f'<span style="font-size:16px;color:#9ca3af;'
+                        f'text-decoration:line-through;margin-left:8px;">'
+                        f'{_format_price(mrp)}</span>'
+                    )
+
+                if discount_pct and float(discount_pct) > 0:
+                    price_html_parts.append(
+                        f'<span style="background:#dcfce7;color:#16a34a;'
+                        f'border-radius:4px;padding:2px 7px;font-size:13px;'
+                        f'font-weight:600;margin-left:8px;">'
+                        f'{float(discount_pct):.0f}% off</span>'
+                    )
+
                 st.markdown(
-                    f'<div style="font-size:28px;font-weight:700;color:#16a34a;'
-                    f'margin:6px 0 2px;">{_format_price(live_price)}</div>',
+                    f'<div style="margin:6px 0 2px;">'
+                    + "".join(price_html_parts)
+                    + "</div>",
                     unsafe_allow_html=True,
                 )
+
+                # Special price row — only when lower than selling price
+                if special_price and live_price and float(special_price) < float(live_price):
+                    st.markdown(
+                        f'<p style="font-size:13px;color:#2563eb;margin:0 0 4px;">'
+                        f'💰 Offer price: <strong>{_format_price(special_price)}</strong>'
+                        f'</p>',
+                        unsafe_allow_html=True,
+                    )
+
                 st.caption(f"Last fetched: {last_fetched}")
 
             with col_btn:
@@ -170,6 +228,17 @@ def render_preview_card(preview: dict) -> None:
             # Seller
             if live.get("seller"):
                 st.caption(f"Sold by: {live['seller']}")
+
+        # ── Bank & card offers — only when present ────────────────────────────
+        # offers=[] for Amazon/Myntra/browser-scraped — section stays hidden.
+        if offers:
+            with st.expander(
+                f"🏦 Bank & Card Offers ({len(offers)} available)", expanded=False
+            ):
+                for offer in offers:
+                    offer_text = offer.strip()
+                    if offer_text:
+                        st.markdown(f"• {offer_text}")
 
         # ── Catalog stats section ─────────────────────────────────────────────
         st.divider()

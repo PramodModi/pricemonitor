@@ -410,6 +410,33 @@ class ScraperWorker:
                 },
             )
 
+            # Write affiliate enrichment fields when present.
+            # Only populated for Flipkart via affiliate API (extraction_method='affiliate_api').
+            # For browser-scraped results all values are None — update_affiliate_data()
+            # skips None values so previously stored affiliate data is never overwritten.
+            affiliate_mrp           = getattr(result, "mrp", None)
+            affiliate_special_price = getattr(result, "special_price", None)
+            affiliate_discount_pct  = getattr(result, "discount_pct", None)
+            affiliate_offers        = getattr(result, "offers", []) or []
+
+            if any(v is not None for v in [affiliate_mrp, affiliate_special_price, affiliate_discount_pct]) \
+                    or affiliate_offers:
+                product_repo.update_affiliate_data(
+                    product,
+                    mrp=affiliate_mrp,
+                    special_price=affiliate_special_price,
+                    discount_pct=affiliate_discount_pct,
+                    offers=affiliate_offers,
+                )
+                logger.info(
+                    f"Affiliate data written — "
+                    f"worker_id={self.worker_id} "
+                    f"product_id={str(job.product_id)} "
+                    f"mrp={affiliate_mrp} "
+                    f"discount_pct={affiliate_discount_pct} "
+                    f"offers_count={len(affiliate_offers)}"
+                )
+
             ph_repo.insert(
                 product_id=job.product_id,
                 price=new_price,

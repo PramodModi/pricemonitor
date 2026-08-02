@@ -93,6 +93,8 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeout,
 )
 
+from app.scraper_v2.affiliate import AFFILIATE_CLIENTS
+from app.scraper_v2.affiliate.result import AffiliateResult
 from app.scraper_v2.core.config import settings
 from app.scraper_v2.core.logging import get_logger
 from app.scraper_v2.models.scrape_result import ScrapeFailureReason, ScrapeResponse
@@ -205,6 +207,37 @@ class ScraperEngine:
             f"job_id={job_id} "
             f"url={url!r:.200}"
         )
+
+        # ── Attempt 0: Affiliate API ──────────────────────────────────────────
+        # Tried before any Playwright browser is opened.
+        # fetch() internally handles: 3 retries, exponential backoff (1s/2s),
+        # re-auth on timeout/auth error, and rate-limit wait (30s).
+        # Returns None on miss or exhausted retries → fall through to browser cascade.
+        for client in AFFILIATE_CLIENTS:
+            if client.can_handle(url):
+                logger.info(
+                    f"[ENGINE] attempt=0 mechanism=affiliate_api "
+                    f"platform={client.platform_name} "
+                    f"url={url!r:.200}"
+                )
+                affiliate_result = client.fetch(url)
+                if affiliate_result is not None:
+                    logger.info(
+                        f"[ENGINE] affiliate API hit — "
+                        f"platform={affiliate_result.platform} "
+                        f"price={affiliate_result.price} — "
+                        f"skipping browser cascade"
+                    )
+                    return self._affiliate_result_to_scrape_response(
+                        affiliate_result, url, config, job_id
+                    )
+                logger.info(
+                    f"[ENGINE] affiliate API miss for "
+                    f"platform={client.platform_name} — "
+                    f"proceeding to browser cascade"
+                )
+                break   # Only one client matches per URL — stop iterating
+        # ── End attempt 0 ────────────────────────────────────────────────────
 
         last_response: Optional[ScrapeResponse] = None
         last_cause:    Optional[FailureCause]   = None
@@ -660,6 +693,52 @@ class ScraperEngine:
                 pass
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _affiliate_result_to_scrape_response(
+        self,
+        result: AffiliateResult,
+        url: str,
+        config: PortalConfig,
+        job_id: str,
+    ) -> ScrapeResponse:
+        """
+        Convert an AffiliateResult (from the affiliate API layer, attempt 0)
+        into a ScrapeResponse that is identical in shape to what GenericScraper
+        returns, so the caller (scraper_worker.py / preview route) needs no
+        special-casing.
+
+        Diagnostic fields:
+            extraction_method = 'affiliate_api'  → visible in scrape_diagnostics
+            layers_attempted  = ['affiliate_api']
+            navigation_ms     = 0  (no browser navigation occurred)
+        """
+        return ScrapeResponse(
+            job_id=job_id,
+            success=True,
+            portal=config.name,
+            attempt_number=0,
+            current_price=result.price,
+            name=result.name,
+            image_url=result.image_url,
+            availability=result.availability,
+            brand=result.brand,
+            marketplace_product_id=result.product_id,
+            currency="INR",
+            extraction_method="affiliate_api",
+            layers_attempted=["affiliate_api"],
+            layers_failed=[],
+            navigation_ms=0,
+            extraction_ms=0,
+            error_type=None,
+            error_message=None,
+            worker_id=None,
+            # Affiliate enrichment fields — passed through from AffiliateResult.
+            # None for Amazon/Myntra stubs; populated for Flipkart.
+            mrp=result.mrp,
+            special_price=result.special_price,
+            discount_pct=result.discount_pct,
+            offers=result.offers or [],
+        )
 
     def _resolve_config(self, url: str) -> Optional[PortalConfig]:
         """Resolve PortalConfig from URL domain. Returns None on failure."""

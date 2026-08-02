@@ -10,15 +10,18 @@ from api_client import get_product
 
 def _format_last_fetched(ts: Optional[str]) -> str:
     """
-    Format a UTC ISO timestamp as an absolute date+time string.
-    e.g. "2026-07-30T06:00:00Z" → "30 Jul, 6:00 AM"
+    Format a UTC ISO timestamp as an absolute date+time string in IST (UTC+5:30).
+    e.g. "2026-07-30T06:00:00Z" → "30 Jul, 11:30 AM"
     Returns "Never fetched" when ts is None.
     """
-    if not ts:
+    if ts is None:
         return "Never fetched"
     try:
+        from datetime import timezone, timedelta
+        IST = timezone(timedelta(hours=5, minutes=30))
         dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-        return dt.strftime("%-d %b, %-I:%M %p")
+        dt_ist = dt.astimezone(IST)
+        return dt_ist.strftime("%-d %b, %-I:%M %p")
     except Exception:
         return str(ts)
 
@@ -33,16 +36,13 @@ if not product_id:
     st.stop()
 
 if st.button("← Back to My Items"):
-    st.session_state.view_product_id    = None
+    st.session_state.view_product_id     = None
     st.session_state.product_detail_data = None
     st.switch_page("pages/dashboard.py")
 
-# ── Load product — from session cache if available, else fetch from API ───────
-# product_detail_data is populated on first load and updated by the 🔄 button.
-# Clear it when navigating to a different product.
+# ── Load product ──────────────────────────────────────────────────────────────
 cached = st.session_state.get("product_detail_data")
 if cached and str(cached.get("product_id")) != str(product_id):
-    # stale cache from a previous product — discard
     st.session_state.product_detail_data = None
     cached = None
 
@@ -86,8 +86,53 @@ with col_info:
     avail = "✅ In Stock" if p.get("availability") else "❌ Out of Stock"
     st.caption(f"{platform_label}  ·  {avail}")
 
-    if p.get("current_price"):
-        st.markdown(f"### ₹{float(p['current_price']):,.0f}")
+    # ── Pricing block ─────────────────────────────────────────────────────────
+    # current_price is always shown.
+    # mrp shown only when present AND different from current_price
+    #   (same price = no real discount to display).
+    # special_price shown only when present AND lower than current_price.
+    # discount_pct shown alongside mrp when present.
+    # All three are None for Amazon / Myntra / browser-scraped results — those
+    # sections stay completely invisible.
+
+    current_price = p.get("current_price")
+    mrp           = p.get("mrp")
+    special_price = p.get("special_price")
+    discount_pct  = p.get("discount_pct")
+
+    if current_price:
+        price_parts = [f"₹{float(current_price):,.0f}"]
+
+        # Show MRP with strikethrough only when it differs from selling price
+        if mrp and float(mrp) != float(current_price):
+            price_parts.append(
+                f"<span style='text-decoration:line-through;color:#9ca3af;font-size:0.8em;'>"
+                f"₹{float(mrp):,.0f}</span>"
+            )
+
+        # Discount badge
+        if discount_pct and discount_pct > 0:
+            price_parts.append(
+                f"<span style='background:#dcfce7;color:#16a34a;"
+                f"border-radius:4px;padding:2px 7px;font-size:0.75em;"
+                f"font-weight:600;'>{discount_pct:.0f}% off</span>"
+            )
+
+        st.markdown(
+            f"<div style='font-size:1.8em;font-weight:700;margin:4px 0;'>"
+            + " &nbsp;".join(price_parts)
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Special price row — only when lower than selling price
+        if special_price and float(special_price) < float(current_price):
+            st.markdown(
+                f"<p style='font-size:0.85em;color:#2563eb;margin:0 0 4px;'>"
+                f"💰 Offer price: <strong>₹{float(special_price):,.0f}</strong>"
+                f"</p>",
+                unsafe_allow_html=True,
+            )
 
     meta = []
     if p.get("rating"):
@@ -100,10 +145,7 @@ with col_info:
     if p.get("seller"):
         st.caption(f"Sold by: {p['seller']}")
 
-    # ── Last fetched timestamp + 🔄 button ────────────────────────────────────
-    # Rendered as plain HTML caption so the button sits directly inline with
-    # the timestamp text rather than in a separate Streamlit column that
-    # Streamlit would push to the far right of the page.
+    # ── Last fetched + refresh ─────────────────────────────────────────────────
     st.markdown(
         f'<p style="font-size:14px;color:#6b7280;margin:0 0 6px;">'
         f'Last fetched: {_format_last_fetched(p.get("last_checked_at"))}'
@@ -123,6 +165,17 @@ with col_info:
         url=p["url"],
         type="primary",
     )
+
+# ── Bank offers — only when present (Flipkart affiliate API) ──────────────────
+# offers is [] for Amazon, Myntra, and browser-scraped results — section hidden.
+offers = p.get("offers") or []
+if offers:
+    st.divider()
+    with st.expander(f"🏦 Bank & Card Offers ({len(offers)} available)", expanded=False):
+        for offer in offers:
+            offer_text = offer.strip()
+            if offer_text:
+                st.markdown(f"• {offer_text}")
 
 # ── Price stats + history chart ───────────────────────────────────────────────
 

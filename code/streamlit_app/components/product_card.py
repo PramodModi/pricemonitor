@@ -5,15 +5,18 @@ import streamlit as st
 
 def _format_last_fetched(ts: Optional[str]) -> str:
     """
-    Format a UTC ISO timestamp as an absolute date+time string.
-    e.g. "2026-07-30T06:00:00Z" → "30 Jul, 6:00 AM"
+    Format a UTC ISO timestamp as an absolute date+time string in IST (UTC+5:30).
+    e.g. "2026-07-30T06:00:00Z" → "30 Jul, 11:30 AM"
     Returns "Never fetched" when ts is None.
     """
     if ts is None:
         return "Never fetched"
     try:
+        from datetime import timezone, timedelta
+        IST = timezone(timedelta(hours=5, minutes=30))
         dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-        return dt.strftime("%-d %b, %-I:%M %p")
+        dt_ist = dt.astimezone(IST)
+        return dt_ist.strftime("%-d %b, %-I:%M %p")
     except Exception:
         return str(ts)
 

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -11,6 +11,7 @@ from app.fastapi.schemas.product import (
 )
 from app.services.url_validator import url_validator
 from app.services.preview_cache import preview_cache, ProductSnapshot
+from app.services.product_sync import _build_affiliated_url
 from app.repositories.product_repo import ProductRepository
 from app.repositories.price_history_repo import PriceHistoryRepository
 from app.core.exceptions import (
@@ -31,6 +32,120 @@ logger = get_logger(__name__)
 
 _amazon_scraper = AmazonScraper()
 _flipkart_scraper = FlipkartScraper()
+
+
+def _background_scrape_and_store(
+    product_id: uuid.UUID,
+    url: str,
+    platform: str,
+) -> None:
+    """
+    Background task — runs after PATH A preview returns to the user.
+
+    Scrapes the product URL, updates price + metadata + affiliate fields
+    in the DB so the next 🔄 Refresh returns fresh data.
+
+    Opens its own DB session (runs outside the request lifecycle).
+    Silently swallows all errors — must never crash the server.
+    """
+    from app.core.database import SessionLocal
+
+    logger.info(
+        f"[BACKGROUND_SCRAPE] start — "
+        f"product_id={product_id} platform={platform} url={url}"
+    )
+    try:
+        with ScraperEngine() as engine:
+            result = engine.scrape(url)
+    except Exception as exc:
+        logger.warning(
+            f"[BACKGROUND_SCRAPE] scrape failed — "
+            f"product_id={product_id} error={exc}"
+        )
+        return
+
+    if not result.success:
+        logger.warning(
+            f"[BACKGROUND_SCRAPE] scrape unsuccessful — "
+            f"product_id={product_id} "
+            f"error_type={result.error_type}"
+        )
+        return
+
+    db = SessionLocal()
+    try:
+        product_repo = ProductRepository(db)
+        ph_repo = PriceHistoryRepository(db)
+
+        product = product_repo.get_by_id(product_id)
+        if product is None:
+            logger.warning(
+                f"[BACKGROUND_SCRAPE] product not found in DB — "
+                f"product_id={product_id}"
+            )
+            return
+
+        # Update price if changed
+        new_price = result.current_price
+        if new_price is not None and new_price != product.current_price:
+            product_repo.update_current_price(product, new_price)
+
+        # Update metadata
+        product_repo.update_from_live_data(
+            product,
+            {
+                "name":            result.name or product.name,
+                "brand":           result.brand,
+                "image_url":       result.image_url,
+                "availability":    result.availability,
+                "rating":          result.rating,
+                "review_count":    result.review_count,
+                "seller":          result.seller,
+                "last_checked_at": datetime.now(timezone.utc),
+            },
+        )
+
+        # Write affiliate enrichment when present
+        affiliate_mrp           = getattr(result, "mrp", None)
+        affiliate_special_price = getattr(result, "special_price", None)
+        affiliate_discount_pct  = getattr(result, "discount_pct", None)
+        affiliate_offers        = getattr(result, "offers", []) or []
+
+        if any(v is not None for v in [affiliate_mrp, affiliate_special_price,
+                                        affiliate_discount_pct]) or affiliate_offers:
+            product_repo.update_affiliate_data(
+                product,
+                mrp=affiliate_mrp,
+                special_price=affiliate_special_price,
+                discount_pct=affiliate_discount_pct,
+                offers=affiliate_offers,
+            )
+
+        # Write price history row
+        ph_repo.insert(
+            product_id=product_id,
+            price=new_price,
+            scrape_status="success",
+            run_id=None,
+        )
+
+        db.commit()
+        logger.info(
+            f"[BACKGROUND_SCRAPE] done — "
+            f"product_id={product_id} "
+            f"price={new_price} "
+            f"mrp={affiliate_mrp} "
+            f"offers_count={len(affiliate_offers)}"
+        )
+
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            f"[BACKGROUND_SCRAPE] DB write failed — "
+            f"product_id={product_id} error={exc}"
+        )
+    finally:
+        db.close()
 
 
 def _build_catalog_data(existing, product_repo: ProductRepository, live_price=None) -> CatalogData:
@@ -74,6 +189,7 @@ def _build_catalog_data(existing, product_repo: ProductRepository, live_price=No
 )
 def preview_product(
     body: PreviewRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> PreviewResponse:
     """
@@ -146,6 +262,11 @@ def preview_product(
             review_count=existing.review_count,
             seller=existing.seller,
             scraped_at=existing.last_checked_at or datetime.now(timezone.utc),
+            # Read affiliate enrichment from DB — None when not yet populated
+            mrp=existing.mrp,
+            special_price=existing.special_price,
+            discount_pct=float(existing.discount_pct) if existing.discount_pct is not None else None,
+            offers=existing.offers or [],
         )
 
         catalog_data = _build_catalog_data(existing, product_repo, live_price=None)
@@ -161,6 +282,21 @@ def preview_product(
             catalog_data=catalog_data.model_dump() if catalog_data else None,
         )
         preview_cache.store(snapshot)
+
+        # ── Trigger background scrape to refresh DB data ──────────────────────
+        # PATH A returns instantly with DB data. The background task scrapes
+        # the live URL and updates price + metadata + affiliate fields in DB.
+        # When the user clicks 🔄 Refresh, get_product() reads the fresh data.
+        background_tasks.add_task(
+            _background_scrape_and_store,
+            product_id=existing.product_id,
+            url=existing.url,
+            platform=existing.platform,
+        )
+        logger.info(
+            f"[PREVIEW] PATH A — background scrape queued — "
+            f"product_id={existing.product_id}"
+        )
 
         return PreviewResponse(
             preview_id=preview_id,
@@ -300,6 +436,18 @@ def preview_product(
     )
     scraped_at = datetime.now(timezone.utc)
 
+    # ── DEBUG: log all result fields for tracing enrichment data flow ─────────
+    logger.info(
+        f"[PREVIEW][debug] scrape result fields — "
+        f"extraction_method={result.extraction_method} "
+        f"current_price={result.current_price} "
+        f"mrp={getattr(result, 'mrp', 'ATTR_MISSING')} "
+        f"special_price={getattr(result, 'special_price', 'ATTR_MISSING')} "
+        f"discount_pct={getattr(result, 'discount_pct', 'ATTR_MISSING')} "
+        f"offers_count={len(getattr(result, 'offers', []) or [])} "
+        f"offers_preview={list(getattr(result, 'offers', []) or [])[:2]}"
+    )
+
     live_data = LiveData(
         marketplace_product_id=marketplace_product_id,
         url=validated.canonical_url,
@@ -314,25 +462,123 @@ def preview_product(
         review_count=result.review_count,
         seller=result.seller,
         scraped_at=scraped_at,
+        # Affiliate API enrichment — present only when source=affiliate_api.
+        # None for browser-scraped results; schema defaults handle the rest.
+        mrp=getattr(result, "mrp", None),
+        special_price=getattr(result, "special_price", None),
+        discount_pct=getattr(result, "discount_pct", None),
+        offers=getattr(result, "offers", []) or [],
     )
 
-    # Step 4 — DB lookup after scrape (will be None — already checked above)
-    # Re-check using ASIN resolved from scrape (handles amzn.in short URLs
-    # where marketplace_product_id was empty at validation time)
+    # ── DEBUG: confirm enrichment fields made it into LiveData ────────────────
+    logger.info(
+        f"[PREVIEW][debug] LiveData built — "
+        f"current_price={live_data.current_price} "
+        f"mrp={live_data.mrp} "
+        f"special_price={live_data.special_price} "
+        f"discount_pct={live_data.discount_pct} "
+        f"offers_count={len(live_data.offers)} "
+        f"offers_preview={live_data.offers[:2]}"
+    )
+
+    # Step 4 — DB lookup after scrape (handles amzn.in short URL ASIN redirect)
     existing_after_scrape = None
     if marketplace_product_id and marketplace_product_id != validated.marketplace_product_id:
         existing_after_scrape = product_repo.get_by_platform_and_marketplace_id(
             validated.platform, marketplace_product_id
         )
 
-    catalog_data = None
-    is_new_product = existing_after_scrape is None
+    # ── Write product to DB immediately (PATH B) ──────────────────────────────
+    # Product is written/updated at preview time — no confirmation needed.
+    # confirm_subscription() will only add the subscription row.
+    scraped_now = datetime.now(timezone.utc)
+    affiliated_url = _build_affiliated_url(validated.canonical_url, validated.platform)
 
-    if existing_after_scrape:
-        catalog_data = _build_catalog_data(
-            existing_after_scrape, product_repo, live_price=result.current_price
+    # Re-check DB using the resolved marketplace_product_id
+    db_product = existing_after_scrape or product_repo.get_by_platform_and_marketplace_id(
+        validated.platform, marketplace_product_id
+    )
+
+    if db_product is None:
+        # New product — create row
+        db_product = product_repo.create(
+            url=affiliated_url,
+            platform=validated.platform,
+            marketplace_product_id=marketplace_product_id,
+            name=result.name,
+            brand=result.brand,
+            image_url=result.image_url,
+            current_price=result.current_price,
+            currency="INR",
+            availability=result.availability,
+            rating=result.rating,
+            review_count=result.review_count,
+            seller=result.seller,
+            last_checked_at=scraped_now,
         )
-    # (normal Path B with no ASIN redirect: existing is None, catalog_data stays None)
+        # Write affiliate enrichment
+        product_repo.update_affiliate_data(
+            db_product,
+            mrp=getattr(result, "mrp", None),
+            special_price=getattr(result, "special_price", None),
+            discount_pct=getattr(result, "discount_pct", None),
+            offers=getattr(result, "offers", []) or [],
+        )
+        # First price history row
+        ph_repo_preview = PriceHistoryRepository(db)
+        ph_repo_preview.insert(
+            product_id=db_product.product_id,
+            price=result.current_price,
+            scrape_status="success",
+            run_id=None,
+        )
+        logger.info(
+            f"[PREVIEW] PATH B — new product written to DB — "
+            f"product_id={db_product.product_id} "
+            f"platform={validated.platform}"
+        )
+    else:
+        # Existing product — update metadata + affiliate fields
+        product_repo.update_from_live_data(
+            db_product,
+            {
+                "name":            result.name,
+                "brand":           result.brand,
+                "image_url":       result.image_url,
+                "availability":    result.availability,
+                "rating":          result.rating,
+                "review_count":    result.review_count,
+                "seller":          result.seller,
+                "last_checked_at": scraped_now,
+            },
+        )
+        product_repo.update_affiliate_data(
+            db_product,
+            mrp=getattr(result, "mrp", None),
+            special_price=getattr(result, "special_price", None),
+            discount_pct=getattr(result, "discount_pct", None),
+            offers=getattr(result, "offers", []) or [],
+        )
+        if result.current_price is not None and result.current_price != db_product.current_price:
+            product_repo.update_current_price(db_product, result.current_price)
+        logger.info(
+            f"[PREVIEW] PATH B — existing product updated in DB — "
+            f"product_id={db_product.product_id}"
+        )
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"[PREVIEW] PATH B — DB write failed — error={exc}")
+
+    is_new_product = db_product is not None
+
+    catalog_data = None
+    if db_product:
+        catalog_data = _build_catalog_data(
+            db_product, product_repo, live_price=result.current_price
+        )
 
     # Step 5 — cache snapshot
     preview_id = uuid.uuid4()

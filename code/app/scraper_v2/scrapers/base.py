@@ -364,33 +364,28 @@ class BaseScraper:
         return None
 
     # ── Layer 6 — Affiliate API ───────────────────────────────────────────────
+    #
+    # This layer is intentionally a no-op inside BaseScraper.
+    #
+    # The affiliate API is now handled by ScraperEngine as *attempt 0* —
+    # before any Playwright browser is opened. Each marketplace has its own
+    # concrete client in app/scraper_v2/affiliate/:
+    #
+    #   FlipkartAffiliateClient  — active (requires FLIPKART_AFFILIATE_TOKEN)
+    #   AmazonAffiliateClient    — stub (activates when PA-API creds are set)
+    #
+    # Keeping this method here preserves the layer_fns dispatch table in
+    # _extract_price_with_fallbacks() without any structural change. The layer
+    # is registered in layer_order / portals.yaml and simply returns None,
+    # so it contributes zero cost when reached (which should be rare — the
+    # affiliate API at attempt 0 would have already succeeded or fallen through).
 
     def _try_affiliate_api(self, url: str, portal_name: str) -> Optional[Decimal]:
         """
-        Amazon PA-API 5.0 — GetItems operation.
-
-        Stub — implement when PA-API access is obtained.
-        Returns None silently when credentials are not configured
-        so the stub causes no failures.
-
-        To implement:
-            1. Set AMAZON_PAAPI_KEY, AMAZON_PAAPI_SECRET in .env
-            2. pip install python-amazon-paapi5
-            3. Replace the NotImplementedError block below
+        No-op stub — affiliate API is handled by ScraperEngine at attempt 0.
+        Returns None so the extraction cascade continues to the next layer.
+        See app/scraper_v2/affiliate/ for the actual implementations.
         """
-        from app.scraper_v2.core.config import settings
-
-        if not settings.amazon_paapi_key or not settings.amazon_paapi_secret:
-            # Credentials not configured — skip silently
-            return None
-
-        if portal_name != "amazon":
-            # Only Amazon has an affiliate API
-            return None
-
-        # TODO: implement when PA-API access received
-        # from paapi5_python_sdk import ... (python-amazon-paapi5)
-        logger.debug(f"[LAYER] affiliate_api — stub, skipping — url={url}")
         return None
 
     # ── Orchestrator ──────────────────────────────────────────────────────────
