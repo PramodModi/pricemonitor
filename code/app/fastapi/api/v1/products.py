@@ -121,6 +121,16 @@ def _background_scrape_and_store(
                 offers=affiliate_offers,
             )
 
+        # Write product_metadata — merge so existing richer data is preserved
+        incoming_metadata = getattr(result, "product_metadata", None) or {}
+        if incoming_metadata:
+            from app.scraper_v2.engine import ScraperEngine
+            merged = ScraperEngine.merge_metadata(
+                existing=product.product_metadata,
+                incoming=incoming_metadata,
+            )
+            product_repo.update_product_metadata(product, merged)
+
         # Write price history row
         ph_repo.insert(
             product_id=product_id,
@@ -515,6 +525,7 @@ def preview_product(
             review_count=result.review_count,
             seller=result.seller,
             last_checked_at=scraped_now,
+            product_metadata=getattr(result, "product_metadata", None) or {},
         )
         # Write affiliate enrichment
         product_repo.update_affiliate_data(
@@ -559,6 +570,15 @@ def preview_product(
             discount_pct=getattr(result, "discount_pct", None),
             offers=getattr(result, "offers", []) or [],
         )
+        # Write product_metadata — merge so existing richer data is preserved
+        incoming_metadata = getattr(result, "product_metadata", None) or {}
+        if incoming_metadata:
+            from app.scraper_v2.engine import ScraperEngine
+            merged = ScraperEngine.merge_metadata(
+                existing=db_product.product_metadata,
+                incoming=incoming_metadata,
+            )
+            product_repo.update_product_metadata(db_product, merged)
         if result.current_price is not None and result.current_price != db_product.current_price:
             product_repo.update_current_price(db_product, result.current_price)
         logger.info(
@@ -634,11 +654,19 @@ def get_product(
     ph_repo = PriceHistoryRepository(db)
     history_rows = ph_repo.get_for_product(product_id, limit=90)
 
+    # Build column dict using DB column names, then override product_metadata
+    # because SQLAlchemy's reserved 'metadata' attribute name means
+    # getattr(product, 'metadata') returns the ORM metadata object, not our
+    # JSONB column. We read it via the ORM attribute name 'product_metadata'.
+    col_data = {
+        c.name: getattr(product, c.name)
+        for c in product.__table__.columns
+        if c.name != "metadata"   # skip — read via ORM attribute below
+    }
+
     return ProductOut(
-        **{
-            c.name: getattr(product, c.name)
-            for c in product.__table__.columns
-        },
+        **col_data,
+        product_metadata=product.product_metadata or {},
         watcher_count=watcher_count,
         price_stats=PriceStats(**price_stats_raw) if price_stats_raw else None,
         price_history=[

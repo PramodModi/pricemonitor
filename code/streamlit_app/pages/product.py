@@ -178,6 +178,67 @@ if offers:
             if offer_text:
                 st.markdown(f"• {offer_text}")
 
+# ── Product metadata (description, features, specs, sizes) ──────────────────
+# Populated for all portals when scraper or affiliate API extracts enrichment.
+# Each section is hidden when the relevant key is absent — no empty sections.
+
+meta_data = p.get("product_metadata") or {}
+
+if meta_data:
+    st.divider()
+
+    # ── Description ───────────────────────────────────────────────────────────
+    description = meta_data.get("description")
+    if description:
+        with st.expander("📄 Product Description", expanded=False):
+            st.markdown(description)
+
+    # ── Features / highlights ─────────────────────────────────────────────────
+    features = meta_data.get("features") or []
+    if features:
+        with st.expander(f"✨ Key Features ({len(features)})", expanded=True):
+            for feat in features:
+                st.markdown(f"• {feat}")
+
+    # ── Sizes available (Myntra) ───────────────────────────────────────────────
+    sizes = meta_data.get("sizes_available") or []
+    if sizes:
+        st.markdown("**Sizes Available**")
+        cols = st.columns(min(len(sizes), 8))
+        for i, size in enumerate(sizes):
+            with cols[i % len(cols)]:
+                st.markdown(
+                    f'<div style="border:1px solid #d1d5db;border-radius:6px;'
+                    f'padding:4px 10px;text-align:center;font-size:13px;'
+                    f'font-weight:600;margin:2px;">{size}</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── Specs table ───────────────────────────────────────────────────────────
+    specs = meta_data.get("specs") or {}
+    if specs:
+        with st.expander(f"🔧 Specifications ({len(specs)} items)", expanded=False):
+            import pandas as pd
+            specs_df = pd.DataFrame(
+                list(specs.items()), columns=["Specification", "Value"]
+            )
+            st.dataframe(
+                specs_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    # ── Additional material / fit info (Myntra) ───────────────────────────────
+    material_parts = []
+    if meta_data.get("material"):
+        material_parts.append(f"**Material:** {meta_data['material']}")
+    if meta_data.get("fit"):
+        material_parts.append(f"**Fit:** {meta_data['fit']}")
+    if meta_data.get("style_notes"):
+        material_parts.append(f"**Style:** {meta_data['style_notes']}")
+    if material_parts:
+        st.caption("  ·  ".join(material_parts))
+
 # ── Price stats + history chart ───────────────────────────────────────────────
 
 stats = p.get("price_stats")

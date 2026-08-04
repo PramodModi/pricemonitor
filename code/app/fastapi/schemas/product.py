@@ -34,6 +34,12 @@ class LiveData(BaseModel):
     discount_pct: Optional[float] = None
     offers: Optional[list[str]] = []
 
+    # ── Extended metadata (JSONB) ──────────────────────────────────────────────
+    # Portal-specific enrichment: description, images, category, subcategory,
+    # specs, features, sizes_available, material, fit, style_notes.
+    # Empty dict when not yet populated.
+    product_metadata: dict = {}
+
 
 class PriceStats(BaseModel):
     all_time_low: Decimal
@@ -92,6 +98,9 @@ class ProductOut(BaseModel):
     discount_pct: Optional[float] = None
     offers: Optional[list[str]] = []
 
+    # ── Extended metadata (JSONB) ──────────────────────────────────────────────
+    product_metadata: Optional[dict] = {}
+
     model_config = {"from_attributes": True}
 
     @field_validator("offers", mode="before")
@@ -100,6 +109,14 @@ class ProductOut(BaseModel):
         """Coerce NULL from DB (None) to empty list."""
         if v is None:
             return []
+        return v
+
+    @field_validator("product_metadata", mode="before")
+    @classmethod
+    def coerce_metadata(cls, v: object) -> dict:
+        """Coerce NULL from DB (None) to empty dict."""
+        if v is None:
+            return {}
         return v
 
     @field_validator("price_history", mode="before")

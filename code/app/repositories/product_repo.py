@@ -96,6 +96,21 @@ class ProductRepository:
         self.db.flush()
         return product
 
+    def update_product_metadata(
+        self,
+        product: Product,
+        metadata: dict,
+    ) -> Product:
+        """
+        Persist merged product metadata (JSONB) to the products row.
+        Called after every successful scrape when product_metadata is non-empty.
+        The merge logic lives in ScraperEngine.merge_metadata() — by the time
+        this method is called, existing keys have already been preserved.
+        """
+        product.product_metadata = metadata
+        self.db.flush()
+        return product
+
     def get_all_for_scraping(self) -> list[Product]:
         return list(
             self.db.scalars(

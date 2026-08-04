@@ -738,7 +738,36 @@ class ScraperEngine:
             special_price=result.special_price,
             discount_pct=result.discount_pct,
             offers=result.offers or [],
+            # Extended metadata — merged into products.metadata JSONB on write.
+            # API data wins on key conflict; existing DB keys preserved when
+            # the scraper cannot provide them (merge logic in scraper_worker).
+            product_metadata=result.metadata or {},
         )
+
+    @staticmethod
+    def merge_metadata(existing: Optional[dict], incoming: Optional[dict]) -> dict:
+        """
+        Merge incoming metadata into existing, preserving existing keys that
+        the current scrape could not provide.
+
+        Strategy: existing keys win (API-first principle).
+        If today's scrape is a browser fallback that has fewer fields than
+        yesterday's API call, we keep the richer API data intact.
+
+        Called by scraper_worker._write_result() before saving to DB.
+
+        Example:
+            existing = {"specs": {"RAM": "8GB"}, "category": "Electronics"}
+            incoming = {"category": "Mobiles", "description": "Great phone"}
+            result   = {"specs": {"RAM": "8GB"}, "category": "Electronics",
+                        "description": "Great phone"}
+        """
+        if not existing:
+            return incoming or {}
+        if not incoming:
+            return existing
+        # incoming fills gaps; existing wins on conflict
+        return {**incoming, **existing}
 
     def _resolve_config(self, url: str) -> Optional[PortalConfig]:
         """Resolve PortalConfig from URL domain. Returns None on failure."""

@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import Boolean, Integer, Numeric, String, Text, TIMESTAMP, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -44,13 +44,30 @@ class Product(Base):
     )
 
     # ── Affiliate API enrichment ───────────────────────────────────────────────
-    # Populated for Flipkart when extraction_method='affiliate_api'.
-    # NULL for Amazon, Myntra, and browser-scraped results.
-    # Written by scraper_worker._write_result() and preview endpoint.
     mrp: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
     special_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
     discount_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
     offers: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text()), nullable=True)
+
+    # ── Extended product metadata (portal-specific, variable shape) ────────────
+    # Populated by affiliate API (Flipkart) and browser scraper (all portals).
+    # Schema: {
+    #   "description":     str,
+    #   "images":          [str, ...],
+    #   "category":        str,
+    #   "subcategory":     str,
+    #   "specs":           {key: value, ...},
+    #   "features":        [str, ...],        -- Flipkart / Amazon bullet points
+    #   "sizes_available": [str, ...],        -- Myntra only
+    #   "material":        str,               -- Myntra only
+    #   "fit":             str,               -- Myntra only
+    #   "style_notes":     str,               -- Myntra only
+    # }
+    # Keys absent for a portal are simply missing — not null.
+    # Merged on update: existing keys preserved when new scrape cannot provide them.
+    # NOTE: 'metadata' is reserved by SQLAlchemy Declarative API — attribute is
+    # named product_metadata; DB column name stays 'metadata' via name= param.
+    product_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")

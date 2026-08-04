@@ -437,6 +437,25 @@ class ScraperWorker:
                     f"offers_count={len(affiliate_offers)}"
                 )
 
+            # Write extended metadata (JSONB) — merge with existing so that
+            # richer API data is never overwritten by a browser fallback scrape
+            # that could not extract all fields.
+            # merge_metadata(existing, incoming): existing keys win on conflict.
+            incoming_metadata = getattr(result, "product_metadata", None) or {}
+            if incoming_metadata:
+                from app.scraper_v2.engine import ScraperEngine
+                merged = ScraperEngine.merge_metadata(
+                    existing=product.product_metadata,
+                    incoming=incoming_metadata,
+                )
+                product_repo.update_product_metadata(product, merged)
+                logger.info(
+                    f"Product metadata written — "
+                    f"worker_id={self.worker_id} "
+                    f"product_id={str(job.product_id)} "
+                    f"keys={list(merged.keys())}"
+                )
+
             ph_repo.insert(
                 product_id=job.product_id,
                 price=new_price,

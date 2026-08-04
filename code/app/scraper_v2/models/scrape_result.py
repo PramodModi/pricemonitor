@@ -85,6 +85,12 @@ class ScrapeResponse:
     extraction_ms: int = 0
     attempt_number: int = 1
 
+    # ── Extended metadata (JSONB) ────────────────────────────────────────────
+    # Portal-specific enrichment populated by browser scraper (all portals)
+    # and affiliate API (Flipkart). Merged into products.product_metadata on write.
+    # Empty dict when scrape could not extract enrichment fields.
+    product_metadata: dict = field(default_factory=dict)
+
     # ── Worker context ────────────────────────────────────────────────────────
     worker_id: Optional[int] = None
 
