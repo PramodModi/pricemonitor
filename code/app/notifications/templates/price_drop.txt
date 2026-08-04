@@ -1,7 +1,7 @@
-PRICEMONITOR — PRICE DROP ALERT
-==============================
+PRICEMONITOR — PRICE ALERT
+==========================
 
-{{product_name}} just dropped in price!
+Your tracked item dropped in price: {{product_name}}
 
 OLD PRICE: {{old_price}}
 NEW PRICE: {{new_price}}

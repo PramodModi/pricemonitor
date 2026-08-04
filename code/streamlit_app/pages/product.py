@@ -286,7 +286,7 @@ if stats:
         st.altair_chart(chart, use_container_width=True)
     elif len(history) == 1:
         st.caption(
-            "Only one data point so far — chart will appear after the next scrape run."
+            "Only one data point so far — chart will appear after the next monitoring run."
         )
 
 if p.get("watcher_count"):

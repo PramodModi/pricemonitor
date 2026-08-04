@@ -1,8 +1,5 @@
-from decimal import Decimal
-
-
-def get_subject(product_name: str, new_price_fmt: str) -> str:
-    return f"Price drop: {product_name[:60]} is now {new_price_fmt}"
+def get_subject(product_name: str) -> str:
+    return f"Your tracked item dropped — {product_name[:60]}"
 
 
 def get_preheader(old_price_fmt: str, drop_amount_fmt: str, drop_pct: int) -> str:
@@ -13,11 +10,13 @@ def get_preheader(old_price_fmt: str, drop_amount_fmt: str, drop_pct: int) -> st
 PLATFORM_LABEL = {
     "amazon": "Amazon India",
     "flipkart": "Flipkart",
+    "myntra": "Myntra",
 }
 
 PLATFORM_ICON = {
     "amazon": "🛒",
     "flipkart": "🛍️",
+    "myntra": "👗",
 }
 
 CTA_TEXT = "View on {platform_label} →"

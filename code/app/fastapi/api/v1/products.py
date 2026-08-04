@@ -124,7 +124,6 @@ def _background_scrape_and_store(
         # Write product_metadata — merge so existing richer data is preserved
         incoming_metadata = getattr(result, "product_metadata", None) or {}
         if incoming_metadata:
-            from app.scraper_v2.engine import ScraperEngine
             merged = ScraperEngine.merge_metadata(
                 existing=product.product_metadata,
                 incoming=incoming_metadata,
@@ -573,7 +572,6 @@ def preview_product(
         # Write product_metadata — merge so existing richer data is preserved
         incoming_metadata = getattr(result, "product_metadata", None) or {}
         if incoming_metadata:
-            from app.scraper_v2.engine import ScraperEngine
             merged = ScraperEngine.merge_metadata(
                 existing=db_product.product_metadata,
                 incoming=incoming_metadata,

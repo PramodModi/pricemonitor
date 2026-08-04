@@ -4,17 +4,14 @@ from decimal import Decimal
 from typing import Optional
 
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+from sendgrid.helpers.mail import Mail, Header
 
 from app.core.config import settings
 from app.notifications.content.price_drop import (
-    get_subject,
-    get_preheader,
     PLATFORM_LABEL,
     PLATFORM_ICON,
     CTA_TEXT,
     FOOTER_TEXT,
-    FOOTER_UNSUBSCRIBE,
     PRICES_DISCLAIMER,
     MAJOR_DROP_LABEL,
     MAJOR_DROP_THRESHOLD_PCT,
@@ -76,7 +73,7 @@ class EmailSender:
         new_fmt = format_inr(new_price)
         drop_fmt = format_inr(drop_amount)
 
-        subject = get_subject(product_name, new_fmt)
+        subject = f"Your tracked item dropped — {product_name[:60]}"
         safe_name = html.escape(product_name)
 
         major_drop_label = (
@@ -117,7 +114,6 @@ class EmailSender:
             "{{cta_text}}": cta_text,
             "{{prices_disclaimer}}": PRICES_DISCLAIMER,
             "{{footer_text}}": footer_text,
-            "{{footer_unsubscribe}}": FOOTER_UNSUBSCRIBE,
             "{{dashboard_url}}": settings.dashboard_url,
         }
         for placeholder, value in replacements.items():
@@ -146,6 +142,7 @@ class EmailSender:
             plain_text_content=plain_body,
         )
         message.reply_to = settings.email_reply_to
+        message.header = Header("List-Unsubscribe", f"<{settings.dashboard_url}>")
 
         try:
             response = self._client.send(message)
@@ -234,7 +231,7 @@ class EmailSender:
     </body></html>"""
 
         plain_body = (
-            f"PRICEMONITOR — TRACKING CONFIRMED\n"
+            f"Pricemonitor — Tracking confirmed\n"
             f"==================================\n\n"
             f"You're now tracking {product_name}!\n\n"
             f"Current price: {price_fmt}\n"
@@ -253,6 +250,7 @@ class EmailSender:
             plain_text_content=plain_body,
         )
         message.reply_to = settings.email_reply_to
+        message.header = Header("List-Unsubscribe", f"<{settings.dashboard_url}>")
 
         try:
             response = self._client.send(message)
@@ -263,4 +261,4 @@ class EmailSender:
             return False
         except Exception as exc:
             logger.error(f"SendGrid exception — to={to_email}, error={str(exc)}")
-            return False    
+            return False
