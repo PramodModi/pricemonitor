@@ -14,11 +14,11 @@ class Settings(BaseSettings):
     worker_health_check_interval: int = 30
     queue_drain_timeout: int = 60
     email_retry_limit: int = 3
-    email_from_address: str = "alerts@pricewatch.app"
-    email_from_name: str = "Pricemonitor"
-    email_reply_to: str = "no-reply@pricewatch.app"
+    email_from_address: str = "pings@priceping.in"
+    email_from_name: str = "PricePing"
+    email_reply_to: str = "no-reply@priceping.in"
     sendgrid_api_key: str = ""
-    dashboard_url: str = "https://pricewatch.app/dashboard"
+    dashboard_url: str = "https://www.priceping.in/dashboard"
     amazon_affiliate_tag: str = ""
     flipkart_affiliate_id: str = ""
     flipkart_affiliate_token: str = ""
