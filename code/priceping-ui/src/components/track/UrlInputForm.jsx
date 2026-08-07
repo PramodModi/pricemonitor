@@ -5,6 +5,18 @@ import { ArrowRight, Loader2 } from 'lucide-react'
 import { isSupportedPlatformUrl } from '@/lib/utils'
 
 /**
+ * Extracts the first http/https URL from a string.
+ * Handles multiline clipboard text from Myntra's mobile share button,
+ * which prepends the product name on a separate line before the URL:
+ *   "DAMENSCH Men Polo T-shirt\nhttps://www.myntra.com/..."
+ * For normal single-URL pastes the input is returned unchanged.
+ */
+function extractUrl(text) {
+  const match = text.match(/https?:\/\/[^\s]+/)
+  return match ? match[0] : text.trim()
+}
+
+/**
  * UrlInputForm — Step 1 of the Track flow.
  * URL input + Fetch button.
  * Validates on submit (not on change — avoids premature errors).
@@ -28,7 +40,10 @@ export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
 
   const handleSubmit = (e) => {
     e?.preventDefault?.()
-    const trimmed = url.trim()
+
+    // Extract the first URL from the input — handles multiline Myntra share
+    // text where the product name appears on the line before the URL.
+    const trimmed = extractUrl(url.trim())
 
     if (!trimmed) {
       setError('Please paste a product URL.')
@@ -74,7 +89,11 @@ export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
             type="url"
             value={url}
             onChange={(e) => {
-              setUrl(e.target.value)
+              const val = e.target.value
+              // If multiline paste (e.g. Myntra share text), extract the URL
+              // immediately so the input shows the clean URL, not the raw paste.
+              const cleaned = val.includes('\n') ? extractUrl(val) : val
+              setUrl(cleaned)
               if (error) setError('')
             }}
             placeholder="https://www.amazon.in/..."
