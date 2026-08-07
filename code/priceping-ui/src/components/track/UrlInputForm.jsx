@@ -92,7 +92,9 @@ export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
               const val = e.target.value
               // If multiline paste (e.g. Myntra share text), extract the URL
               // immediately so the input shows the clean URL, not the raw paste.
-              const cleaned = val.includes('\n') ? extractUrl(val) : val
+              const cleaned = (!val.startsWith('http') && /https?:\/\//.test(val))
+              ? extractUrl(val)
+              : val
               setUrl(cleaned)
               if (error) setError('')
             }}

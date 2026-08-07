@@ -6,6 +6,18 @@ import { ArrowRight } from 'lucide-react'
 import { isSupportedPlatformUrl } from '@/lib/utils'
 
 /**
+ * Extracts the first http/https URL from a string.
+ * Handles multiline or space-separated clipboard text from Myntra's mobile
+ * share button, which prepends the product name before the URL:
+ *   "DAMENSCH Men Polo T-shirt https://www.myntra.com/..."
+ * For normal URL-only pastes the input is returned unchanged.
+ */
+function extractUrl(text) {
+  const match = text.match(/https?:\/\/[^\s]+/)
+  return match ? match[0] : text.trim()
+}
+
+/**
  * HeroSection — the signature element of the landing page.
  * The URL input box IS the hero. No carousel, no banner.
  *
@@ -19,7 +31,10 @@ export default function HeroSection() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    const trimmed = url.trim()
+
+    // Extract the first URL from the input — handles Myntra share text where
+    // the product name appears before the URL on the same (or next) line.
+    const trimmed = extractUrl(url.trim())
 
     if (!trimmed) {
       setError('Paste a product URL to get started.')
@@ -75,7 +90,17 @@ export default function HeroSection() {
               <input
                 type="url"
                 value={url}
-                onChange={(e) => { setUrl(e.target.value); setError('') }}
+                onChange={(e) => {
+                  const val = e.target.value
+                  // If the pasted text contains a URL preceded by other text
+                  // (e.g. Myntra share: "Product Name https://..."),
+                  // extract the URL immediately so the input shows the clean URL.
+                  const cleaned = (!val.startsWith('http') && /https?:\/\//.test(val))
+                    ? extractUrl(val)
+                    : val
+                  setUrl(cleaned)
+                  setError('')
+                }}
                 placeholder="Paste Amazon, Flipkart, or Myntra URL…"
                 className="hero-input w-full"
                 autoComplete="off"

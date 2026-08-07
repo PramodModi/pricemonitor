@@ -75,6 +75,16 @@ class URLValidator:
                 marketplace_product_id="",
             )
 
+        # dl.flipkart.com/s/... — Flipkart mobile share short URL.
+        # Path structure (/s/XXXXX) is unpredictable; Playwright follows the
+        # redirect to the real product page. No product ID extraction attempted.
+        if domain == "dl.flipkart.com" and parsed.path.startswith("/s/"):
+            return ValidatedURL(
+                platform="flipkart",
+                canonical_url=raw_url.strip(),
+                marketplace_product_id="",
+            )
+
         # Try normal pattern extraction first
         try:
             marketplace_product_id = self._extract_product_id(
