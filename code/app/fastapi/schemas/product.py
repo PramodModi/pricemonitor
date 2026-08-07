@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, field_validator
 
 
@@ -148,3 +148,58 @@ class ProductOut(BaseModel):
             else:
                 result.append(item)
         return result
+
+
+# ---------------------------------------------------------------------------
+# Aliases and schemas for GET /v1/products/{id}/history endpoint
+# ---------------------------------------------------------------------------
+
+# PriceHistoryPoint is the same shape as PricePoint — alias so the router
+# can import either name without changing the existing PricePoint class.
+PriceHistoryPoint = PricePoint
+
+
+class PriceHistoryOut(BaseModel):
+    """Response body for GET /v1/products/{product_id}/history."""
+    product_id: uuid.UUID
+    period: str
+    count: int
+    history: List[PricePoint]
+
+
+# ---------------------------------------------------------------------------
+# Schemas for GET /v1/products (public product catalogue / offers page)
+# ---------------------------------------------------------------------------
+
+class ProductListItem(BaseModel):
+    """
+    Lean product DTO for the offers/catalogue listing page.
+    Omits product_metadata and price_history — not needed for card display.
+    Includes watcher_count and all-time low/high computed by the repository.
+    """
+    product_id: uuid.UUID
+    name: Optional[str] = None
+    image_url: Optional[str] = None
+    url: str
+    platform: str
+    current_price: Optional[Decimal] = None
+    mrp: Optional[Decimal] = None
+    special_price: Optional[Decimal] = None
+    discount_pct: Optional[float] = None
+    availability: Optional[bool] = None
+    rating: Optional[Decimal] = None
+    review_count: Optional[int] = None
+    last_checked_at: Optional[datetime] = None
+    watcher_count: int = 0
+    all_time_low: Optional[Decimal] = None
+    all_time_high: Optional[Decimal] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProductListOut(BaseModel):
+    """Response body for GET /v1/products."""
+    total: int
+    count: int
+    platform: Optional[str] = None
+    items: List[ProductListItem]

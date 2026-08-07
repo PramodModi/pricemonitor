@@ -1,13 +1,15 @@
 import uuid
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.fastapi.schemas.product import (
     PreviewRequest, PreviewResponse, ProductOut,
-    LiveData, CatalogData, PriceStats, PricePoint,
+    LiveData, CatalogData, PriceStats, PriceHistoryPoint, PriceHistoryOut,
+    ProductListItem, ProductListOut,
 )
 from app.services.url_validator import url_validator
 from app.services.preview_cache import preview_cache, ProductSnapshot
@@ -622,6 +624,41 @@ def preview_product(
 
 
 @router.get(
+    "",
+    response_model=ProductListOut,
+    summary="List all products ordered by watcher count",
+)
+def list_products(
+    platform: Optional[str] = Query(
+        default=None,
+        pattern="^(amazon|flipkart|myntra)$",
+        description="Filter by platform. Omit for all platforms.",
+    ),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> ProductListOut:
+    """
+    Return all products in the catalogue ordered by watcher count descending.
+    No authentication required — public endpoint.
+    Used by the /offers browsing page.
+    """
+    product_repo = ProductRepository(db)
+    items_raw, total = product_repo.get_all(
+        platform=platform,
+        limit=limit,
+        offset=offset,
+    )
+    items = [ProductListItem(**item) for item in items_raw]
+    return ProductListOut(
+        total=total,
+        count=len(items),
+        platform=platform,
+        items=items,
+    )
+
+
+@router.get(
     "/{product_id}",
     response_model=ProductOut,
 )
@@ -668,7 +705,78 @@ def get_product(
         watcher_count=watcher_count,
         price_stats=PriceStats(**price_stats_raw) if price_stats_raw else None,
         price_history=[
-            PricePoint(checked_at=row.checked_at, price=row.price)
+            PriceHistoryPoint(checked_at=row.checked_at, price=row.price)
             for row in history_rows
         ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /products/{product_id}/history
+# ---------------------------------------------------------------------------
+
+_PERIOD_DAYS: dict[str, Optional[int]] = {
+    "1m": 30,
+    "3m": 90,
+    "6m": 180,
+    "all": None,
+}
+
+
+@router.get(
+    "/{product_id}/history",
+    response_model=PriceHistoryOut,
+    summary="Get price history for a product",
+)
+def get_product_history(
+    product_id: uuid.UUID,
+    period: str = Query(
+        default="3m",
+        pattern="^(1m|3m|6m|all)$",
+        description="Lookback window: '1m'=30d, '3m'=90d, '6m'=180d, 'all'=full history.",
+    ),
+    db: Session = Depends(get_db),
+) -> PriceHistoryOut:
+    """
+    Return price history for a product filtered by period.
+
+    Only rows with scrape_status='success' and price IS NOT NULL are included.
+    Rows are returned oldest-first for the chart.
+    Empty history list (not 404) when product exists but has no data yet.
+
+    Raises:
+        404 PRODUCT_NOT_FOUND: product_id does not exist.
+        422 VALIDATION_ERROR: period is not one of '1m', '3m', '6m', 'all'.
+    """
+    product_repo = ProductRepository(db)
+    product = product_repo.get_by_id(product_id)
+    if product is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PRODUCT_NOT_FOUND", "message": "Product not found."},
+        )
+
+    days = _PERIOD_DAYS[period]
+    since: Optional[datetime] = None
+    if days is not None:
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    ph_repo = PriceHistoryRepository(db)
+    rows = ph_repo.get_for_product(product_id, since=since)
+
+    history_points = [
+        PriceHistoryPoint(price=row.price, checked_at=row.checked_at)
+        for row in rows
+    ]
+
+    logger.info(
+        f"Price history fetched — product_id={product_id} "
+        f"period={period} count={len(history_points)}"
+    )
+
+    return PriceHistoryOut(
+        product_id=product_id,
+        period=period,
+        count=len(history_points),
+        history=history_points,
     )

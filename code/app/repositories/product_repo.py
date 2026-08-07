@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session
 
 from app.core.models.product import Product
@@ -141,12 +141,23 @@ class ProductRepository:
         if row.all_time_low is None:
             return None
 
-        drop_count = self.db.scalar(
-            select(func.count()).select_from(PriceHistory).where(
-                PriceHistory.product_id == product_id,
-                PriceHistory.scrape_status == "success",
-            )
-        ) or 0
+        drop_result = self.db.execute(
+            text("""
+                SELECT COUNT(*) AS drop_count
+                FROM (
+                    SELECT
+                        price,
+                        LAG(price) OVER (ORDER BY checked_at ASC) AS prev_price
+                    FROM price_history
+                    WHERE product_id = :product_id
+                    AND scrape_status = 'success'
+                    AND price IS NOT NULL
+                ) sub
+                WHERE price < prev_price
+            """),
+            {"product_id": str(product_id)},
+        )
+        drop_count = drop_result.scalar() or 0
 
         return {
             "all_time_low": row.all_time_low,
@@ -154,6 +165,124 @@ class ProductRepository:
             "drop_count": drop_count,
             "first_tracked_at": row.first_tracked_at,
         }
+
+    def get_all(
+        self,
+        platform: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """
+        Return all products ordered by watcher_count DESC, created_at DESC.
+        Includes per-product watcher count and all-time low/high from
+        price_history. Used by GET /v1/products (public offers/catalogue page).
+        """
+        # ── Watcher count per product ──────────────────────────────────────
+        watcher_sq = (
+            select(
+                Subscription.product_id,
+                func.count(Subscription.subscription_id).label("watcher_count"),
+            )
+            .group_by(Subscription.product_id)
+            .subquery()
+        )
+
+        # ── All-time low/high per product (successful scrapes only) ────────
+        stats_sq = (
+            select(
+                PriceHistory.product_id,
+                func.min(PriceHistory.price).label("all_time_low"),
+                func.max(PriceHistory.price).label("all_time_high"),
+            )
+            .where(
+                PriceHistory.scrape_status == "success",
+                PriceHistory.price.isnot(None),
+            )
+            .group_by(PriceHistory.product_id)
+            .subquery()
+        )
+
+        watcher_count_col = func.coalesce(
+            watcher_sq.c.watcher_count, 0
+        ).label("watcher_count")
+
+        q = (
+            select(
+                Product.product_id,
+                Product.name,
+                Product.image_url,
+                Product.url,
+                Product.platform,
+                Product.current_price,
+                Product.mrp,
+                Product.special_price,
+                Product.discount_pct,
+                Product.availability,
+                Product.rating,
+                Product.review_count,
+                Product.last_checked_at,
+                Product.created_at,
+                watcher_count_col,
+                stats_sq.c.all_time_low,
+                stats_sq.c.all_time_high,
+            )
+            .outerjoin(watcher_sq, Product.product_id == watcher_sq.c.product_id)
+            .outerjoin(stats_sq, Product.product_id == stats_sq.c.product_id)
+        )
+
+        if platform:
+            q = q.where(Product.platform == platform)
+
+        # ── Total count (without pagination) ──────────────────────────────
+        count_q = select(func.count(Product.product_id))
+        if platform:
+            count_q = count_q.where(Product.platform == platform)
+        total = self.db.scalar(count_q) or 0
+
+        # ── Paginated results ──────────────────────────────────────────────
+        rows = self.db.execute(
+            q.order_by(
+                func.coalesce(watcher_sq.c.watcher_count, 0).desc(),
+                Product.created_at.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        ).mappings().all()
+
+        return [dict(r) for r in rows], total
+
+    def get_max_prices(
+        self,
+        product_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, "Decimal"]:
+        """
+        Return the all-time maximum successful price for each product_id
+        in a single batch query — no N+1.
+
+        Used by GET /v1/items to compute price_drop_pct on dashboard cards.
+        Comparing current_price against the all-time max correctly surfaces
+        "price peaked then dropped" situations (not just last-scrape changes).
+
+        Returns: {product_id: max_price}
+        Products with no successful price history are absent from the dict.
+        """
+        if not product_ids:
+            return {}
+
+        rows = self.db.execute(
+            select(
+                PriceHistory.product_id,
+                func.max(PriceHistory.price).label("max_price"),
+            )
+            .where(
+                PriceHistory.product_id.in_(product_ids),
+                PriceHistory.scrape_status == "success",
+                PriceHistory.price.isnot(None),
+            )
+            .group_by(PriceHistory.product_id)
+        ).all()
+
+        return {row.product_id: row.max_price for row in rows}
 
     def delete(self, product: Product) -> None:
         self.db.delete(product)

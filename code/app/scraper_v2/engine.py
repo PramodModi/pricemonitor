@@ -712,12 +712,41 @@ class ScraperEngine:
             layers_attempted  = ['affiliate_api']
             navigation_ms     = 0  (no browser navigation occurred)
         """
+        # ── Effective price resolution ────────────────────────────────────────
+        # Use special_price as current_price when it is lower than the base
+        # selling price (Flipkart bank/card offer — flipkartSpecialPrice).
+        # This ensures price_history, all-time stats, drop detection, and
+        # notifications all use the true effective buying price, not the
+        # intermediate selling price that most users never pay.
+        #
+        # special_price is None for Amazon, Myntra, and browser-scraped results
+        # (generic_scraper.py does not extract it) — so this branch is
+        # Flipkart Affiliate API only and has no effect on other paths.
+        has_offer_price = (
+            config.name == "flipkart"
+            and result.special_price is not None
+            and result.special_price < result.price
+        )
+        effective_price = result.special_price if has_offer_price else result.price
+
+        # Recalculate discount_pct against effective_price so the UI shows the
+        # true saving from MRP at the actual buying price, not just the base
+        # selling price discount the API returns.
+        effective_discount_pct = result.discount_pct
+        if has_offer_price and result.mrp and result.mrp > 0:
+            try:
+                effective_discount_pct = float(
+                    (result.mrp - effective_price) / result.mrp * 100
+                )
+            except Exception:
+                pass  # keep original discount_pct on any arithmetic failure
+
         return ScrapeResponse(
             job_id=job_id,
             success=True,
             portal=config.name,
             attempt_number=0,
-            current_price=result.price,
+            current_price=effective_price,
             name=result.name,
             image_url=result.image_url,
             availability=result.availability,
@@ -736,7 +765,7 @@ class ScraperEngine:
             # None for Amazon/Myntra stubs; populated for Flipkart.
             mrp=result.mrp,
             special_price=result.special_price,
-            discount_pct=result.discount_pct,
+            discount_pct=effective_discount_pct,
             offers=result.offers or [],
             # Extended metadata — merged into products.metadata JSONB on write.
             # API data wins on key conflict; existing DB keys preserved when

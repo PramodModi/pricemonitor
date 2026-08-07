@@ -34,22 +34,44 @@ class PriceHistoryRepository:
         self,
         product_id: uuid.UUID,
         limit: int = 90,
+        since=None,
     ) -> list[PriceHistory]:
         """
-        Return the last `limit` successful price rows for a product,
-        ordered oldest-first (for charting).
+        Return successful price rows for a product, ordered oldest-first.
         Only rows with scrape_status='success' and price IS NOT NULL.
+
+        Args:
+            limit: Max rows returned (default 90). Used by get_product().
+            since: Optional datetime cutoff — only rows with checked_at >= since.
+                   Used by the /history endpoint for period filtering.
+                   When since is set, limit is ignored (period filter is the
+                   relevant constraint for the chart).
         """
-        stmt = (
-            select(PriceHistory)
-            .where(
-                PriceHistory.product_id == product_id,
-                PriceHistory.scrape_status == "success",
-                PriceHistory.price.isnot(None),
+        if since is not None:
+            # Period-filtered path for /history endpoint — no row cap needed
+            stmt = (
+                select(PriceHistory)
+                .where(
+                    PriceHistory.product_id == product_id,
+                    PriceHistory.scrape_status == "success",
+                    PriceHistory.price.isnot(None),
+                    PriceHistory.checked_at >= since,
+                )
+                .order_by(PriceHistory.checked_at.asc())
             )
-            .order_by(PriceHistory.checked_at.desc())
-            .limit(limit)
-        )
-        rows = self.db.execute(stmt).scalars().all()
-        # Reverse so chart renders oldest → newest left to right
-        return list(reversed(rows))
+            return list(self.db.execute(stmt).scalars().all())
+        else:
+            # Default path for get_product() — last N rows, oldest-first
+            stmt = (
+                select(PriceHistory)
+                .where(
+                    PriceHistory.product_id == product_id,
+                    PriceHistory.scrape_status == "success",
+                    PriceHistory.price.isnot(None),
+                )
+                .order_by(PriceHistory.checked_at.desc())
+                .limit(limit)
+            )
+            rows = self.db.execute(stmt).scalars().all()
+            # Reverse so chart renders oldest → newest left to right
+            return list(reversed(rows))

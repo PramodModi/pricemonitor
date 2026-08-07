@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.fastapi.api.v1 import products, subscriptions, items, runs, health, internal
 from app.fastapi.api.error_handlers import register_error_handlers
@@ -92,6 +93,17 @@ def create_app() -> FastAPI:
     )
 
     register_error_handlers(app)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",   # Next.js dev server
+            "https://priceping.in",    # production (CFG-003)
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     prefix = "/v1"
     app.include_router(health.router)
