@@ -1,4 +1,5 @@
 import re
+import urllib.request
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
@@ -75,10 +76,16 @@ class URLValidator:
                 marketplace_product_id="",
             )
 
-        # dl.flipkart.com/s/... — Flipkart mobile share short URL.
-        # Path structure (/s/XXXXX) is unpredictable; Playwright follows the
-        # redirect to the real product page. No product ID extraction attempted.
+        # dl.flipkart.com/s/... — Flipkart mobile share short URL (Firebase Dynamic Link).
+        # Resolve the HTTP redirect to the real product URL before scraping so that:
+        #   1. Playwright navigates directly to the product page (avoids JS redirect timeout).
+        #   2. The affiliate API can extract a product ID from the resolved URL.
+        # Falls back to the original short URL if resolution fails.
         if domain == "dl.flipkart.com" and parsed.path.startswith("/s/"):
+            resolved = self._resolve_short_url(raw_url.strip())
+            if resolved != raw_url.strip():
+                return self.validate(resolved)
+            # Resolution failed — pass short URL through; Playwright will try
             return ValidatedURL(
                 platform="flipkart",
                 canonical_url=raw_url.strip(),
@@ -184,6 +191,30 @@ class URLValidator:
             clean_query,
             "",
         ))
+
+    def _resolve_short_url(self, url: str) -> str:
+        """
+        Follow HTTP redirects for a short URL and return the final destination URL.
+        Used for Firebase Dynamic Links (dl.flipkart.com/s/...) which redirect to
+        the real product page via HTTP 301/302 for non-mobile browsers.
+
+        Returns the original URL unchanged on any network or timeout error so that
+        the caller can fall back to passing the short URL directly to the browser.
+        """
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    )
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.url
+        except Exception:
+            return url
 
     def _reconstruct_amazon_url(self, raw_url: str) -> Optional[str]:
         """

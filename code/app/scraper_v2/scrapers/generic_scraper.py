@@ -159,6 +159,17 @@ class GenericScraper(BaseScraper):
                 logger.info(
                     f"[NAV] portal={config.name} nav_ms={nav_ms} url={url}"
                 )
+
+                # For Flipkart short URLs (dl.flipkart.com/s/...): Playwright
+                # follows the Firebase Dynamic Link redirect automatically.
+                # Log the resolved page URL so we know where we actually landed.
+                if config.name == "flipkart" and "/s/" in url and "dl.flipkart.com" in url:
+                    resolved = page.url
+                    if resolved != url:
+                        logger.info(
+                            f"[NAV] Flipkart short URL resolved — "
+                            f"original={url} resolved={resolved}"
+                        )
             except PlaywrightTimeout:
                 total_ms = int((time.monotonic() - t_total_start) * 1000)
                 logger.warning(
@@ -210,6 +221,14 @@ class GenericScraper(BaseScraper):
             hook_ms = int((time.monotonic() - t_hook) * 1000)
             logger.debug(f"[SCRAPE] hook={config.pre_extract_hook} hook_ms={hook_ms}")
  
+        # Affiliate-enriched fields — populated for Flipkart short URLs after
+        # the browser resolves the redirect and we have a real product_id.
+        # Remain None for all other portals and normal URL flows.
+        _affiliate_mrp = None
+        _affiliate_special_price = None
+        _affiliate_discount_pct = None
+        _affiliate_offers: list = []
+
         # ── Price extraction (6 layers) ───────────────────────────────────────
         layer_order = self._get_layer_order(config)
         t_extraction = time.monotonic()
@@ -252,6 +271,47 @@ class GenericScraper(BaseScraper):
  
         # ── Product field extraction ───────────────────────────────────────────
         product_id = self._extract_product_id(page, url, config)
+
+        # ── Affiliate API retry for Flipkart short URLs ───────────────────────
+        # The engine attempted the affiliate API before the browser using the
+        # original short URL — no PID was found, so it was skipped. Now that
+        # the browser has followed the redirect and product_id is extracted from
+        # page.url, retry the affiliate API to get MRP, special_price, and
+        # offers that browser extraction cannot provide.
+        if (
+            config.name == "flipkart"
+            and "dl.flipkart.com" in url
+            and "/s/" in url
+            and product_id
+        ):
+            try:
+                from app.scraper_v2.affiliate.flipkart import FlipkartAffiliateClient
+                _aff_client = FlipkartAffiliateClient()
+                # The resolved page.url contains ?pid=TVSHMHKP5GFWZFAZ — the
+                # affiliate API PID — in addition to the path-based itm... ID.
+                # FlipkartAffiliateClient.extract_product_id() prioritises ?pid=
+                # over the path segment, so it returns the correct affiliate PID.
+                # Using product_id (itm...) directly returns HTTP 404.
+                _affiliate_pid = _aff_client.extract_product_id(page.url) or product_id
+                _aff_client._authenticate()
+                _aff_result = _aff_client._fetch(_affiliate_pid)
+                _affiliate_mrp          = _aff_result.mrp
+                _affiliate_special_price = _aff_result.special_price
+                _affiliate_discount_pct  = _aff_result.discount_pct
+                _affiliate_offers        = _aff_result.offers or []
+                logger.info(
+                    f"[AFFILIATE] post-redirect retry succeeded — "
+                    f"affiliate_pid={_affiliate_pid} "
+                    f"mrp={_affiliate_mrp} "
+                    f"special_price={_affiliate_special_price} "
+                    f"offers={len(_affiliate_offers)}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[AFFILIATE] post-redirect retry failed — "
+                    f"product_id={product_id} error={exc}"
+                )
+
         name = self._extract_name(page, config)
         brand = self._extract_brand(page, config)
         image_url = self._extract_image(page, config)
@@ -284,6 +344,10 @@ class GenericScraper(BaseScraper):
             portal=config.name,
             marketplace_product_id=product_id,
             current_price=price,
+            mrp=_affiliate_mrp,
+            special_price=_affiliate_special_price,
+            discount_pct=_affiliate_discount_pct,
+            offers=_affiliate_offers,
             name=name,
             brand=brand,
             image_url=image_url,
