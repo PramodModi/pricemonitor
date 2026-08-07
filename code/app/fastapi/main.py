@@ -97,8 +97,10 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
-            "http://localhost:3000",   # Next.js dev server
-            "https://priceping.in",    # production (CFG-003)
+            "http://localhost:3000",
+            "https://priceping.in",
+            "https://www.priceping.in",
+            "https://pricemonitor-pi.vercel.app",
         ],
         allow_credentials=True,
         allow_methods=["*"],
