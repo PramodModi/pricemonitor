@@ -61,6 +61,7 @@ class NotificationJob:
     old_price: Decimal
     new_price: Decimal
     run_id: uuid.UUID
+    mrp: Optional[Decimal] = None
 
 
 # ── ScraperWorker ─────────────────────────────────────────────────────────────
@@ -393,6 +394,7 @@ class ScraperWorker:
                     old_price=old_price,
                     new_price=new_price,
                     run_id=job.run_id,
+                    mrp=getattr(result, "mrp", None),
                 ))
 
             # Always refresh metadata from the latest scrape

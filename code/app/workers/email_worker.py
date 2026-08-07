@@ -128,6 +128,7 @@ class EmailWorker:
                 old_price=job.old_price,
                 new_price=job.new_price,
                 platform=self._infer_platform(job.product_url),
+                mrp=job.mrp,
             )
             if success:
                 return "sent"
