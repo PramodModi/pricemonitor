@@ -1,17 +1,17 @@
-PRICEMONITOR — PRICE ALERT
-==========================
+{{greeting}}
 
-Your tracked item dropped in price: {{product_name}}
+The price for an item you're monitoring has changed.
 
-OLD PRICE: {{old_price}}
-NEW PRICE: {{new_price}}
-SAVING:    {{drop_amount}} ({{drop_pct}}% off)
+{{product_name}}
 
-Platform: {{platform_label}}
+  Current price   {{new_price}}
+  Previous price  {{old_price}}
+  You save        {{drop_amount}} ({{drop_pct}}% off)
 
-View the product:
+{{cta_text}}:
 {{product_url}}
 
 ---
-You're receiving this because you're tracking this product on Pricemonitor.
-To stop tracking, visit your dashboard: {{dashboard_url}}
+You requested price alerts from PricePing.
+To stop monitoring, visit your dashboard:
+{{dashboard_url}}
