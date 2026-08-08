@@ -11,6 +11,10 @@ export const metadata = {
   description:
     'Track product prices on Amazon India, Flipkart, and Myntra. Get email alerts the moment a price drops.',
   metadataBase: new URL('https://priceping.in'),
+  icons: {
+    icon: '/favicon.svg',
+    apple: '/favicon.svg',
+  },
 }
 
 export default function RootLayout({ children }) {
