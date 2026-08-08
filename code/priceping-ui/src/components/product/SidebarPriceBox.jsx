@@ -153,9 +153,19 @@ export default function SidebarPriceBox({ product, onRefresh, isRefreshing }) {
         </div>
       ) : (
         // State A/B — not tracking, navigate to track page
-        <a href={trackUrl} className="btn-outline w-full flex items-center justify-center gap-2">
-          🔔 {userEmail ? 'Monitor · Get drop pings' : 'Monitor this price'}
-        </a>
+        <div className="space-y-1.5">
+          <a href={trackUrl} className="btn-outline w-full flex items-center justify-center gap-2">
+            🔔 {userEmail ? 'Monitor · Get drop pings' : 'Monitor this price'}
+          </a>
+          {userEmail && (
+            <p className="text-center text-[11px] text-slate-400">
+              Pings go to{' '}
+              <span className="font-medium text-slate-500 truncate inline-block max-w-[180px] align-bottom">
+                {userEmail}
+              </span>
+            </p>
+          )}
+        </div>
       )}
 
       {/* Last checked + refresh */}

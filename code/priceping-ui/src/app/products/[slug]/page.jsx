@@ -1,6 +1,8 @@
 'use client'
 
 import { useParams } from 'next/navigation'
+import { Suspense } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useProduct } from '@/hooks/useProduct'
 import { toast } from 'sonner'
@@ -34,6 +36,7 @@ import MobileBottomBar from '@/components/product/MobileBottomBar'
 export default function ProductPage() {
   // In Phase 1, `slug` IS the product_id UUID
   const { slug: productId } = useParams()
+
 
   const {
     data: product,
@@ -89,11 +92,13 @@ export default function ProductPage() {
 
         {/* Breadcrumb */}
         <div className="mb-4">
-          <Breadcrumb
-            productName={product.name}
-            category={category}
-            brand={brand}
-          />
+          <Suspense fallback={<div className="h-5" />}>
+            <Breadcrumb
+              productName={product.name}
+              category={category}
+              brand={brand}
+            />
+          </Suspense>
         </div>
 
         {/* ── Two-column layout ──────────────────────────────────── */}

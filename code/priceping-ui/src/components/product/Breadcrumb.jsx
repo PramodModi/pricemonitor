@@ -1,24 +1,32 @@
 'use client'
 
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { ChevronRight, ArrowLeft } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 
 /**
  * Breadcrumb
  * Mounts below the Navbar on the product detail page.
- * Provides explicit navigation — no browser-back dependency.
  *
- * When userEmail is in store (came from dashboard), shows a
- * "← My Items" back link so the user never needs the browser back button.
+ * Back link logic:
+ *   - Came from /dashboard → "← My Items"
+ *   - Came from /offers or anywhere else → "← Offers"
+ *   - userEmail not set → "← Offers" (no dashboard link)
  *
  * Props:
- *   productName  string  — full product name (last crumb, not a link)
+ *   productName  string        — full product name (last crumb, not a link)
  *   category     string | null — from product_metadata.category
  *   brand        string | null — from product_metadata.brand OR product.brand
  */
 export default function Breadcrumb({ productName, category, brand }) {
   const { userEmail } = useAppStore()
+
+  const searchParams = useSearchParams()
+  const from = searchParams.get('from')
+
+  const backHref  = (userEmail && from === 'dashboard') ? '/dashboard' : '/offers'
+  const backLabel = (userEmail && from === 'dashboard') ? 'My Items'   : 'Offers'
 
   const crumbs = [
     { label: 'Home', href: '/' },
@@ -32,6 +40,7 @@ export default function Breadcrumb({ productName, category, brand }) {
 
   return (
     <div className="flex items-center justify-between flex-wrap gap-2">
+
       {/* Main breadcrumb trail */}
       <nav
         aria-label="Breadcrumb"
@@ -49,21 +58,20 @@ export default function Breadcrumb({ productName, category, brand }) {
           </span>
         ))}
         {/* Current page — not a link */}
-        <span className="text-slate-700 font-medium line-clamp-1 max-w-[200px] sm:max-w-none">
+        <span className="text-slate-700 font-medium line-clamp-1 max-w-[160px] sm:max-w-[320px]">
           {productName}
         </span>
       </nav>
 
-      {/* Back to dashboard — only shown for logged-in users */}
-      {userEmail && (
-        <Link
-          href="/dashboard"
-          className="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-700 transition-colors font-medium"
-        >
-          <ArrowLeft size={14} />
-          My Items
-        </Link>
-      )}
+      {/* Single back link — contextual */}
+      <Link
+        href={backHref}
+        className="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-700 transition-colors font-medium"
+      >
+        <ArrowLeft size={14} />
+        {backLabel}
+      </Link>
+
     </div>
   )
 }

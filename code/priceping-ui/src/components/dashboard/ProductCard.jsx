@@ -56,7 +56,7 @@ export default function ProductCard({ item, onRemove }) {
 
   function handleCardClick(e) {
     if (e.target.closest('[data-no-nav]')) return
-    window.open(`/products/${product_id}`, '_blank', 'noopener,noreferrer')
+    window.open(`/products/${product_id}?from=dashboard`, '_blank', 'noopener,noreferrer')
   }
 
   return (
