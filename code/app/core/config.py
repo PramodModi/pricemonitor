@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     queue_drain_timeout: int = 60
     email_retry_limit: int = 3
     email_from_address: str = "pings@priceping.in"
-    email_from_name: str = "PricePing"
+    email_from_name: str = "priceping"
     email_reply_to: str = "support@priceping.in"
     sendgrid_api_key: str = ""
     dashboard_url: str = "https://www.priceping.in/dashboard"

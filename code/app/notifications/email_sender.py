@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, Header
+from sendgrid.helpers.mail import Mail
 
 from app.core.config import settings
 from app.notifications.content.price_drop import (
@@ -51,6 +51,24 @@ def _extract_first_name(email: str) -> str:
     return name.capitalize() if len(name) >= 2 else ""
 
 
+def _build_image_tag(image_url: Optional[str], alt: str) -> str:
+    """Return an <img> tag using HTML width/height attributes (not CSS-only).
+    CSS-only width/height is stripped by Outlook and Gmail on mobile.
+    object-fit:contain is not supported in email clients — omitted.
+    Falls back to a text emoji placeholder when no URL is available.
+    """
+    if image_url:
+        return (
+            f'<img src="{image_url}" alt="{alt}" '
+            f'width="80" height="80" '
+            f'style="display:block;border:0;outline:none;" />'
+        )
+    return (
+        '<div style="width:80px;height:80px;background:#f3f4f6;'
+        'text-align:center;line-height:80px;font-size:28px;">📦</div>'
+    )
+
+
 class EmailSender:
     """
     Sends price drop notification and subscription confirmation emails via SendGrid.
@@ -59,7 +77,9 @@ class EmailSender:
     """
 
     def __init__(self) -> None:
-        self._client = SendGridAPIClient(settings.sendgrid_api_key)
+        key = settings.sendgrid_api_key
+        logger.info(f"EmailSender init — api_key={'SET' if key else 'EMPTY'} length={len(key)}")
+        self._client = SendGridAPIClient(key)
         self._html_template = _load_template("price_drop.html")
         self._txt_template = _load_template("price_drop.txt")
 
@@ -72,6 +92,7 @@ class EmailSender:
         old_price: Decimal,
         new_price: Decimal,
         platform: str,
+        mrp: Optional[Decimal] = None,
     ) -> bool:
         drop_amount, drop_pct = calculate_drop(old_price, new_price)
         drop_pct_int = round(drop_pct)
@@ -83,7 +104,6 @@ class EmailSender:
         new_fmt = format_inr(new_price)
         drop_fmt = format_inr(drop_amount)
 
-        # Specific subject — product name + new price, no vague phrasing
         name_short = (product_name[:55] + "…") if len(product_name) > 55 else product_name
         subject = f"Price dropped: {name_short} — now {new_fmt}"
         safe_name = html.escape(product_name)
@@ -91,17 +111,21 @@ class EmailSender:
         first_name = _extract_first_name(to_email)
         greeting = f"Hi {first_name}," if first_name else "Hi,"
 
-        if product_image_url:
-            product_image = (
-                f'<img src="{product_image_url}" alt="{safe_name}" '
-                f'style="width:80px;height:80px;max-width:80px;max-height:80px;'
-                f'object-fit:contain;display:block;" />'
+        product_image = _build_image_tag(product_image_url, safe_name)
+
+        # MRP row — injected into template only when mrp exists and exceeds current price
+        if mrp and mrp > new_price:
+            mrp_fmt = format_inr(mrp)
+            mrp_row_html = (
+                "<tr>"
+                '<td style="font-size:13px;color:#9ca3af;padding:0 24px 6px 0;white-space:nowrap;">MRP</td>'
+                f'<td style="font-size:13px;color:#9ca3af;text-decoration:line-through;padding-bottom:6px;">{mrp_fmt}</td>'
+                "</tr>"
             )
+            mrp_row_txt = f"  MRP             {mrp_fmt}\n"
         else:
-            product_image = (
-                '<div style="width:80px;height:80px;background:#f3f4f6;'
-                'text-align:center;line-height:80px;font-size:28px;">📦</div>'
-            )
+            mrp_row_html = ""
+            mrp_row_txt = ""
 
         # Build HTML from template
         html_body = self._html_template
@@ -109,6 +133,7 @@ class EmailSender:
             "{{greeting}}": greeting,
             "{{product_image}}": product_image,
             "{{product_name}}": safe_name,
+            "{{mrp_row}}": mrp_row_html,
             "{{new_price}}": new_fmt,
             "{{old_price}}": old_fmt,
             "{{drop_amount}}": drop_fmt,
@@ -125,6 +150,7 @@ class EmailSender:
         for placeholder, value in {
             "{{greeting}}": greeting,
             "{{product_name}}": product_name,
+            "{{mrp_row}}": mrp_row_txt,
             "{{new_price}}": new_fmt,
             "{{old_price}}": old_fmt,
             "{{drop_amount}}": drop_fmt,
@@ -143,7 +169,6 @@ class EmailSender:
             plain_text_content=plain_body,
         )
         message.reply_to = settings.email_reply_to
-        message.header = Header("List-Unsubscribe", f"<{settings.dashboard_url}>")
 
         try:
             response = self._client.send(message)
@@ -155,7 +180,15 @@ class EmailSender:
             )
             return False
         except Exception as exc:
-            logger.error(f"SendGrid exception — to={to_email}, error={str(exc)}")
+            body = getattr(exc, "body", None)
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+            logger.error(
+                f"SendGrid exception — "
+                f"to={to_email} "
+                f"status={getattr(exc, 'status_code', '?')} "
+                f"body={body or str(exc)}"
+            )
             return False
 
     def send_subscription_confirmation(
@@ -178,17 +211,7 @@ class EmailSender:
         name_short = (product_name[:55] + "…") if len(product_name) > 55 else product_name
         subject = f"Monitoring started: {name_short}"
 
-        if product_image_url:
-            image_block = (
-                f'<img src="{product_image_url}" alt="{safe_name}" '
-                f'style="width:80px;height:80px;max-width:80px;max-height:80px;'
-                f'object-fit:contain;display:block;" />'
-            )
-        else:
-            image_block = (
-                '<div style="width:80px;height:80px;background:#f3f4f6;'
-                'text-align:center;line-height:80px;font-size:28px;">📦</div>'
-            )
+        image_block = _build_image_tag(product_image_url, safe_name)
 
         html_body = f"""<!DOCTYPE html>
 <html lang="en">
@@ -254,7 +277,6 @@ class EmailSender:
             plain_text_content=plain_body,
         )
         message.reply_to = settings.email_reply_to
-        message.header = Header("List-Unsubscribe", f"<{settings.dashboard_url}>")
 
         try:
             response = self._client.send(message)
@@ -266,5 +288,13 @@ class EmailSender:
             )
             return False
         except Exception as exc:
-            logger.error(f"SendGrid exception — to={to_email}, error={str(exc)}")
+            body = getattr(exc, "body", None)
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+            logger.error(
+                f"SendGrid exception — "
+                f"to={to_email} "
+                f"status={getattr(exc, 'status_code', '?')} "
+                f"body={body or str(exc)}"
+            )
             return False
