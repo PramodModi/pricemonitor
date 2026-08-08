@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     email_retry_limit: int = 3
     email_from_address: str = "pings@priceping.in"
     email_from_name: str = "PricePing"
-    email_reply_to: str = "no-reply@priceping.in"
+    email_reply_to: str = "support@priceping.in"
     sendgrid_api_key: str = ""
     dashboard_url: str = "https://www.priceping.in/dashboard"
     amazon_affiliate_tag: str = ""
