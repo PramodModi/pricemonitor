@@ -85,6 +85,12 @@ class ScrapeResponse:
     extraction_ms: int = 0
     attempt_number: int = 1
 
+    # ── Unified category ──────────────────────────────────────────────────────
+    # Mapped from product_metadata["category"] by CategoryMapper.
+    # One of: mobiles, electronics, fashion, home, beauty, sports, books,
+    # toys, other. Always populated on success; None on failure.
+    category: Optional[str] = None
+
     # ── Extended metadata (JSONB) ────────────────────────────────────────────
     # Portal-specific enrichment populated by browser scraper (all portals)
     # and affiliate API (Flipkart). Merged into products.product_metadata on write.

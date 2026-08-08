@@ -25,19 +25,12 @@ class LiveData(BaseModel):
     scraped_at: datetime
 
     # ── Affiliate API enrichment (present only when source=affiliate_api) ─────
-    # All default to None / empty — UI must check before rendering.
-    # Populated for Flipkart via affiliate API; None for Amazon, Myntra,
-    # and any browser-scraped result today. Will auto-show when future
-    # platforms provide this data.
     mrp: Optional[Decimal] = None
     special_price: Optional[Decimal] = None
     discount_pct: Optional[float] = None
     offers: Optional[list[str]] = []
 
     # ── Extended metadata (JSONB) ──────────────────────────────────────────────
-    # Portal-specific enrichment: description, images, category, subcategory,
-    # specs, features, sizes_available, material, fit, style_notes.
-    # Empty dict when not yet populated.
     product_metadata: dict = {}
 
 
@@ -92,7 +85,7 @@ class ProductOut(BaseModel):
     price_stats: Optional[PriceStats] = None
     price_history: list[PricePoint] = []
 
-    # ── Affiliate API enrichment (same as LiveData — None when not available) ─
+    # ── Affiliate API enrichment ───────────────────────────────────────────────
     mrp: Optional[Decimal] = None
     special_price: Optional[Decimal] = None
     discount_pct: Optional[float] = None
@@ -100,6 +93,10 @@ class ProductOut(BaseModel):
 
     # ── Extended metadata (JSONB) ──────────────────────────────────────────────
     product_metadata: Optional[dict] = {}
+
+    # ── Unified category ───────────────────────────────────────────────────────
+    # Optional for backward compatibility — existing DB rows have server_default.
+    category: Optional[str] = "other"
 
     model_config = {"from_attributes": True}
 
@@ -154,8 +151,6 @@ class ProductOut(BaseModel):
 # Aliases and schemas for GET /v1/products/{id}/history endpoint
 # ---------------------------------------------------------------------------
 
-# PriceHistoryPoint is the same shape as PricePoint — alias so the router
-# can import either name without changing the existing PricePoint class.
 PriceHistoryPoint = PricePoint
 
 
@@ -193,6 +188,10 @@ class ProductListItem(BaseModel):
     watcher_count: int = 0
     all_time_low: Optional[Decimal] = None
     all_time_high: Optional[Decimal] = None
+
+    # ── Unified category ───────────────────────────────────────────────────────
+    # Optional for backward compatibility — DB default is 'other'.
+    category: Optional[str] = "other"
 
     model_config = {"from_attributes": True}
 

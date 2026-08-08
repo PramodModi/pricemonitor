@@ -166,9 +166,19 @@ class ProductRepository:
             "first_tracked_at": row.first_tracked_at,
         }
 
+    def update_category(self, product: Product, category: str) -> Product:
+        """
+        Persist the unified category slug to the products row.
+        Called by scraper_worker after a successful scrape.
+        """
+        product.category = category
+        self.db.flush()
+        return product
+
     def get_all(
         self,
         platform: Optional[str] = None,
+        category: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
@@ -176,6 +186,12 @@ class ProductRepository:
         Return all products ordered by watcher_count DESC, created_at DESC.
         Includes per-product watcher count and all-time low/high from
         price_history. Used by GET /v1/products (public offers/catalogue page).
+
+        Args:
+            platform: Optional platform filter ("amazon" | "flipkart" | "myntra").
+            category: Optional unified category filter ("mobiles" | "electronics" | ...).
+            limit:    Max rows to return (1–100).
+            offset:   Pagination offset.
         """
         # ── Watcher count per product ──────────────────────────────────────
         watcher_sq = (
@@ -222,6 +238,7 @@ class ProductRepository:
                 Product.review_count,
                 Product.last_checked_at,
                 Product.created_at,
+                Product.category,
                 watcher_count_col,
                 stats_sq.c.all_time_low,
                 stats_sq.c.all_time_high,
@@ -233,10 +250,15 @@ class ProductRepository:
         if platform:
             q = q.where(Product.platform == platform)
 
+        if category:
+            q = q.where(Product.category == category)
+
         # ── Total count (without pagination) ──────────────────────────────
         count_q = select(func.count(Product.product_id))
         if platform:
             count_q = count_q.where(Product.platform == platform)
+        if category:
+            count_q = count_q.where(Product.category == category)
         total = self.db.scalar(count_q) or 0
 
         # ── Paginated results ──────────────────────────────────────────────

@@ -337,7 +337,17 @@ class GenericScraper(BaseScraper):
  
         # ── Extended metadata extraction ──────────────────────────────────────
         product_metadata = self._extract_metadata(page, config)
- 
+
+        # ── Category classification ───────────────────────────────────────────
+        # Derived from product_metadata["category"] already extracted above.
+        # Never raises — map_category_from_metadata always returns a valid slug.
+        try:
+            from app.scraper_v2.scrapers.category_mapper import map_category_from_metadata
+            category = map_category_from_metadata(product_metadata)
+        except Exception as cat_exc:
+            logger.debug(f"[SCRAPE] category mapping failed — {cat_exc}")
+            category = "other"
+
         return ScrapeResponse(
             success=True,
             job_id=job_id,
@@ -364,6 +374,7 @@ class GenericScraper(BaseScraper):
             attempt_number=attempt_number,
             worker_id=worker_id,
             product_metadata=product_metadata,
+            category=category,
         )
  
     # ── Bot detection ─────────────────────────────────────────────────────────

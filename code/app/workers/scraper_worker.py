@@ -458,6 +458,23 @@ class ScraperWorker:
                     f"keys={list(merged.keys())}"
                 )
 
+            # Write unified category — populated by generic_scraper from
+            # product_metadata["category"]. Only updates when non-None and
+            # not "other" so a failed classification never overwrites a
+            # previously correct category.
+            incoming_category = getattr(result, "category", None)
+            if incoming_category and incoming_category != "other":
+                product_repo.update_category(product, incoming_category)
+                logger.info(
+                    f"Category written — "
+                    f"worker_id={self.worker_id} "
+                    f"product_id={str(job.product_id)} "
+                    f"category={incoming_category}"
+                )
+            elif incoming_category == "other" and product.category == "other":
+                # Both old and new are 'other' — write to confirm classification ran.
+                product_repo.update_category(product, "other")
+
             ph_repo.insert(
                 product_id=job.product_id,
                 price=new_price,

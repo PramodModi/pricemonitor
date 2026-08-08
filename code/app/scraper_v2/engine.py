@@ -771,7 +771,24 @@ class ScraperEngine:
             # API data wins on key conflict; existing DB keys preserved when
             # the scraper cannot provide them (merge logic in scraper_worker).
             product_metadata=result.metadata or {},
+            # Category — mapped from result.metadata["category"] (affiliate API
+            # already parsed this — e.g. "Mobiles", "Electronics" from Flipkart).
+            # map_category_from_metadata never raises — always returns a valid slug.
+            category=self._map_category(result.metadata),
         )
+
+    def _map_category(self, metadata: Optional[dict]) -> str:
+        """
+        Map product_metadata["category"] to a unified PricePing slug.
+        Used for affiliate API results where category is already parsed.
+        Never raises — always returns a valid slug ("other" as fallback).
+        """
+        try:
+            from app.scraper_v2.scrapers.category_mapper import map_category_from_metadata
+            return map_category_from_metadata(metadata)
+        except Exception as exc:
+            logger.debug(f"[ENGINE] category mapping failed — {exc}")
+            return "other"
 
     @staticmethod
     def merge_metadata(existing: Optional[dict], incoming: Optional[dict]) -> dict:

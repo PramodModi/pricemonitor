@@ -132,6 +132,15 @@ def _background_scrape_and_store(
             )
             product_repo.update_product_metadata(product, merged)
 
+        # Write category
+        incoming_category = getattr(result, "category", None)
+        if incoming_category:
+            product_repo.update_category(product, incoming_category)
+            logger.info(
+                f"[BACKGROUND_SCRAPE] category written — "
+                f"product_id={product_id} category={incoming_category}"
+            )
+
         # Write price history row
         ph_repo.insert(
             product_id=product_id,
@@ -536,6 +545,11 @@ def preview_product(
             discount_pct=getattr(result, "discount_pct", None),
             offers=getattr(result, "offers", []) or [],
         )
+        # Write category
+        incoming_category = getattr(result, "category", None)
+        if incoming_category:
+            product_repo.update_category(db_product, incoming_category)
+
         # First price history row
         ph_repo_preview = PriceHistoryRepository(db)
         ph_repo_preview.insert(
@@ -581,6 +595,10 @@ def preview_product(
             product_repo.update_product_metadata(db_product, merged)
         if result.current_price is not None and result.current_price != db_product.current_price:
             product_repo.update_current_price(db_product, result.current_price)
+        # Write category
+        incoming_category = getattr(result, "category", None)
+        if incoming_category:
+            product_repo.update_category(db_product, incoming_category)
         logger.info(
             f"[PREVIEW] PATH B — existing product updated in DB — "
             f"product_id={db_product.product_id}"
@@ -634,6 +652,14 @@ def list_products(
         pattern="^(amazon|flipkart|myntra)$",
         description="Filter by platform. Omit for all platforms.",
     ),
+    category: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filter by unified category. "
+            "One of: mobiles, electronics, fashion, home, beauty, sports, books, toys, other. "
+            "Omit for all categories. Multiple values not supported — call once per category."
+        ),
+    ),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -642,10 +668,13 @@ def list_products(
     Return all products in the catalogue ordered by watcher count descending.
     No authentication required — public endpoint.
     Used by the /offers browsing page.
+
+    Supports optional filtering by platform and/or category.
     """
     product_repo = ProductRepository(db)
     items_raw, total = product_repo.get_all(
         platform=platform,
+        category=category,
         limit=limit,
         offset=offset,
     )

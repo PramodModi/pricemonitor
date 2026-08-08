@@ -69,6 +69,14 @@ class Product(Base):
     # named product_metadata; DB column name stays 'metadata' via name= param.
     product_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 
+    # ── Unified category ───────────────────────────────────────────────────────
+    # Mapped from product_metadata["category"] by CategoryMapper at scrape time.
+    # One of: mobiles, electronics, fashion, home, beauty, sports, books, toys, other.
+    # Default 'other' — all existing rows remain valid after migration.
+    category: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="other"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
