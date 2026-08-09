@@ -274,38 +274,81 @@ class GenericScraper(BaseScraper):
 
         # ── Affiliate API retry for Flipkart short URLs ───────────────────────
         # The engine attempted the affiliate API before the browser using the
-        # original short URL — no PID was found, so it was skipped. Now that
-        # the browser has followed the redirect and product_id is extracted from
-        # page.url, retry the affiliate API to get MRP, special_price, and
-        # offers that browser extraction cannot provide.
+        # original short URL — no PID was found, so it was skipped.
+        #
+        # Now that extraction has run, retry the affiliate API to get MRP,
+        # special_price, and offers that browser/ScraperAPI extraction cannot
+        # provide.
+        #
+        # Two paths:
+        # A) Browser followed the Firebase Dynamic Link redirect:
+        #    page.url = real flipkart.com URL with ?pid=... — use it directly.
+        # B) ScraperAPI pre-loaded HTML (skip_navigation=True):
+        #    page.url = "about:blank" — page.url is useless.
+        #    Instead, extract the canonical URL from the HTML content.
+        #    Flipkart embeds <link rel="canonical" href="flipkart.com/...?pid=...">
+        #    in every product page. That URL has the real ?pid= query param.
         if (
             config.name == "flipkart"
             and "dl.flipkart.com" in url
             and "/s/" in url
-            and product_id
         ):
             try:
                 from app.scraper_v2.affiliate.flipkart import FlipkartAffiliateClient
                 _aff_client = FlipkartAffiliateClient()
-                # The resolved page.url contains ?pid=TVSHMHKP5GFWZFAZ — the
-                # affiliate API PID — in addition to the path-based itm... ID.
-                # FlipkartAffiliateClient.extract_product_id() prioritises ?pid=
-                # over the path segment, so it returns the correct affiliate PID.
-                # Using product_id (itm...) directly returns HTTP 404.
-                _affiliate_pid = _aff_client.extract_product_id(page.url) or product_id
-                _aff_client._authenticate()
-                _aff_result = _aff_client._fetch(_affiliate_pid)
-                _affiliate_mrp          = _aff_result.mrp
-                _affiliate_special_price = _aff_result.special_price
-                _affiliate_discount_pct  = _aff_result.discount_pct
-                _affiliate_offers        = _aff_result.offers or []
-                logger.info(
-                    f"[AFFILIATE] post-redirect retry succeeded — "
-                    f"affiliate_pid={_affiliate_pid} "
-                    f"mrp={_affiliate_mrp} "
-                    f"special_price={_affiliate_special_price} "
-                    f"offers={len(_affiliate_offers)}"
-                )
+
+                # Resolve the URL that contains the affiliate PID (?pid=...).
+                # Path A: browser navigation — page.url is the real product URL.
+                # Path B: ScraperAPI (skip_navigation=True) — extract canonical.
+                _pid_source_url = None
+                if not skip_navigation and page.url and "flipkart.com" in page.url:
+                    # Path A — browser followed the redirect
+                    _pid_source_url = page.url
+                else:
+                    # Path B — ScraperAPI: extract canonical URL from HTML
+                    try:
+                        _canonical = page.get_attribute(
+                            'link[rel="canonical"]', "href", timeout=2000
+                        )
+                        if _canonical and "flipkart.com" in _canonical:
+                            _pid_source_url = _canonical
+                            logger.info(
+                                f"[AFFILIATE] canonical URL extracted from HTML — "
+                                f"canonical={_canonical!r:.200}"
+                            )
+                    except Exception:
+                        pass
+
+                if _pid_source_url:
+                    # FlipkartAffiliateClient.extract_product_id() prioritises
+                    # ?pid= query param over the path-based itm... ID.
+                    # Using itm... directly returns HTTP 404 from the affiliate API.
+                    _affiliate_pid = (
+                        _aff_client.extract_product_id(_pid_source_url)
+                        or product_id
+                    )
+                else:
+                    _affiliate_pid = product_id
+
+                if _affiliate_pid:
+                    _aff_client._authenticate()
+                    _aff_result = _aff_client._fetch(_affiliate_pid)
+                    _affiliate_mrp          = _aff_result.mrp
+                    _affiliate_special_price = _aff_result.special_price
+                    _affiliate_discount_pct  = _aff_result.discount_pct
+                    _affiliate_offers        = _aff_result.offers or []
+                    logger.info(
+                        f"[AFFILIATE] post-redirect retry succeeded — "
+                        f"affiliate_pid={_affiliate_pid} "
+                        f"mrp={_affiliate_mrp} "
+                        f"special_price={_affiliate_special_price} "
+                        f"offers={len(_affiliate_offers)}"
+                    )
+                else:
+                    logger.warning(
+                        f"[AFFILIATE] post-redirect retry skipped — "
+                        f"could not resolve affiliate PID from short URL"
+                    )
             except Exception as exc:
                 logger.warning(
                     f"[AFFILIATE] post-redirect retry failed — "
