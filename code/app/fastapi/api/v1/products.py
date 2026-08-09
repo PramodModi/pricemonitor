@@ -384,6 +384,20 @@ def preview_product(
                     f"error_type={result.error_type} "
                     f"error={result.error_message}"
                 )
+                # Semaphore queue timeout — another scrape was already in progress.
+                # Return 503 so the frontend shows "try again" immediately instead
+                # of waiting for the Axios 35s timeout to expire.
+                from app.scraper_v2.models.scrape_result import ScrapeFailureReason
+                if result.error_type == ScrapeFailureReason.TIMEOUT and (
+                    result.error_message and "queue" in (result.error_message or "").lower()
+                ):
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "code": "SCRAPE_BUSY",
+                            "message": "Another product is being fetched. Please try again in a moment.",
+                        },
+                    )
                 raise HTTPException(
                     status_code=502,
                     detail={

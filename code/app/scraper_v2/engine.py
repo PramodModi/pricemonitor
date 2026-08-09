@@ -81,6 +81,7 @@ Context split: Myntra / Firefox contexts never override UA (v2.2 FIX-001/002).
 from __future__ import annotations
 
 import random
+import threading
 import time
 import uuid
 from typing import Optional
@@ -108,6 +109,20 @@ from app.scraper_v2.scrapers.portal_config import PortalConfig
 from app.scraper_v2.scrapers.registry import get_config_for_domain
 
 logger = get_logger(__name__)
+
+# ── Process-level scrape semaphore ────────────────────────────────────────────
+# Playwright's sync API uses a global lock internally. Running multiple
+# ScraperEngine instances concurrently (e.g. three rapid preview requests)
+# causes thread contention that serialises at the Playwright level anyway —
+# but only AFTER each thread has already launched a full browser and started
+# navigating, wasting memory and multiplying wall-clock time.
+#
+# This semaphore caps concurrent live scrapes to 1 per process. A second
+# preview request waits here (up to _SCRAPE_QUEUE_TIMEOUT_S) instead of
+# inside Playwright. If the timeout expires the request returns a 503 so
+# the frontend can show a "try again" message instead of a 35-second hang.
+_SCRAPE_SEMAPHORE = threading.Semaphore(1)
+_SCRAPE_QUEUE_TIMEOUT_S = 60   # max seconds a queued scrape will wait
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -189,6 +204,26 @@ class ScraperEngine:
             success=False with error_type, error_message, and diagnostics.
             Never raises.
         """
+        acquired = _SCRAPE_SEMAPHORE.acquire(timeout=_SCRAPE_QUEUE_TIMEOUT_S)
+        if not acquired:
+            logger.warning(
+                f"[ENGINE] semaphore timeout — scrape queue full, "
+                f"rejecting request after {_SCRAPE_QUEUE_TIMEOUT_S}s — url={url!r:.200}"
+            )
+            return ScrapeResponse(
+                job_id=str(uuid.uuid4()),
+                success=False,
+                portal="unknown",
+                error_type=ScrapeFailureReason.TIMEOUT,
+                error_message="Scrape queue full — another scrape is in progress. Please try again.",
+            )
+        try:
+            return self._scrape_inner(url)
+        finally:
+            _SCRAPE_SEMAPHORE.release()
+
+    def _scrape_inner(self, url: str) -> ScrapeResponse:
+        """Internal scrape implementation — called only when semaphore is held."""
         config = self._resolve_config(url)
         if config is None:
             return ScrapeResponse(
