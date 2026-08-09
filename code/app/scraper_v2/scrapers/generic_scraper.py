@@ -297,44 +297,39 @@ class GenericScraper(BaseScraper):
                 from app.scraper_v2.affiliate.flipkart import FlipkartAffiliateClient
                 _aff_client = FlipkartAffiliateClient()
 
-                # Resolve the URL that contains the affiliate PID (?pid=...).
-                # Path A: browser navigation — page.url is the real product URL.
-                # Path B: ScraperAPI (skip_navigation=True) — extract canonical.
-                _pid_source_url = None
-                if not skip_navigation and page.url and "flipkart.com" in page.url:
-                    # Path A — browser followed the redirect
-                    _pid_source_url = page.url
-                else:
-                    # Path B — ScraperAPI: extract canonical URL from HTML
-                    try:
-                        _canonical = page.get_attribute(
-                            'link[rel="canonical"]', "href", timeout=2000
-                        )
-                        if _canonical and "flipkart.com" in _canonical:
-                            _pid_source_url = _canonical
-                            logger.info(
-                                f"[AFFILIATE] canonical URL extracted from HTML — "
-                                f"canonical={_canonical!r:.200}"
-                            )
-                    except Exception:
-                        pass
-
-                # FlipkartAffiliateClient.extract_product_id() prioritises
-                # ?pid= query param over the path-based itm... ID.
-                # Using itm... directly returns HTTP 404 from the affiliate API.
+                # Resolve the affiliate PID (?pid=UPPERCASE_ID).
+                #
+                # Flipkart affiliate PIDs are UPPERCASE alphanumeric
+                # (e.g. TVSHBYPVKBF9EK74). The path-based product ID
+                # (e.g. itm170167561d8cd) returns HTTP 404 from the API.
+                #
+                # Path A: browser navigation — page.url is the real product URL
+                #   which contains ?pid=... as a query param. Use it directly.
+                # Path B: ScraperAPI (skip_navigation=True) — page.url is
+                #   about:blank. The canonical URL has NO ?pid= (Flipkart omits
+                #   it from the SEO canonical). Scan the raw HTML instead —
+                #   the 1.3MB ScraperAPI response contains ?pid=TVSH... in
+                #   multiple product links and JSON data blocks.
                 _affiliate_pid = None
-                if _pid_source_url:
-                    _affiliate_pid = _aff_client.extract_product_id(_pid_source_url)
 
-                # If canonical URL had no ?pid= (SEO canonical omits it),
-                # scan the raw HTML for ?pid=<UPPERCASE_ID> directly.
-                # ScraperAPI returns the full rendered page which contains
-                # ?pid=TVSH... in product links and JSON data.
+                if not skip_navigation and page.url and "flipkart.com" in page.url:
+                    # Path A — browser followed the redirect, page.url has ?pid=
+                    _affiliate_pid = _aff_client.extract_product_id(page.url)
+                    if _affiliate_pid:
+                        logger.info(
+                            f"[AFFILIATE] pid from page.url — pid={_affiliate_pid}"
+                        )
+
                 if not _affiliate_pid:
+                    # Path B (and Path A fallback) — regex scan raw HTML
                     try:
                         import re as _re
                         _html = page.content()
-                        _pid_match = _re.search(r'[?&]pid=([A-Z0-9]{10,20})', _html)
+                        # Flipkart affiliate PIDs: uppercase alphanumeric, 10-20 chars
+                        # Never matches path IDs (itm... is lowercase)
+                        _pid_match = _re.search(
+                            r'[?&]pid=([A-Z0-9]{10,20})', _html
+                        )
                         if _pid_match:
                             _affiliate_pid = _pid_match.group(1)
                             logger.info(
@@ -345,6 +340,8 @@ class GenericScraper(BaseScraper):
                         pass
 
                 if not _affiliate_pid:
+                    # Last resort — use path-based product_id (likely 404,
+                    # but better than nothing)
                     _affiliate_pid = product_id
 
                 if _affiliate_pid:
