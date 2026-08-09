@@ -9,14 +9,15 @@ import { getErrorMessage } from './errors'
  *   - Production:  https://api.priceping.in
  *
  * Timeout: 35 000ms — the preview endpoint triggers a live Playwright scrape
- * (10–20s). All other endpoints respond in under 2s. One timeout for simplicity.
+ * (15–90s via ScraperAPI on Railway). All other endpoints respond in under 2s.
+ * 150s matches the backend semaphore queue timeout (120s) plus 30s buffer.
  *
  * Auth interceptor: attaches JWT from Zustand store as Bearer token when present.
  * Error interceptor: maps API error codes → user-facing messages.
  */
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
-  timeout: 35_000,
+  timeout: 150_000,
   headers: {
     'Content-Type': 'application/json',
   },
