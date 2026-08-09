@@ -274,10 +274,47 @@ class ScraperEngine:
                 break   # Only one client matches per URL — stop iterating
         # ── End attempt 0 ────────────────────────────────────────────────────
 
+        # ── Flipkart short URL pre-resolution ────────────────────────────────
+        # dl.flipkart.com/s/ URLs are Firebase Dynamic Links. On Railway,
+        # Flipkart's WAF intercepts the browser redirect with a bot-check page
+        # BEFORE following the Firebase redirect — so page.url never becomes
+        # the real product URL and our post-browser capture cannot extract the PID.
+        #
+        # Fix: resolve the short URL via a plain HTTP HEAD request (no browser,
+        # no JS) BEFORE opening any browser. Firebase Dynamic Links respond to
+        # standard HTTP redirects normally even from datacenter IPs.
+        # Once we have the real URL with PID, retry the affiliate API immediately.
+        # If affiliate hits  → return (fast, free, gets MRP/offers).
+        # If affiliate misses → resolved_url is still used for all browser/ScraperAPI
+        #                       attempts, so they never have to follow the short URL.
+        if config.name == "flipkart" and "dl.flipkart.com/s/" in url:
+            http_resolved = self._resolve_flipkart_short_url(url)
+            if http_resolved and http_resolved != url:
+                logger.info(
+                    f"[ENGINE] flipkart short URL pre-resolved via HTTP — "
+                    f"short={url!r:.80} "
+                    f"resolved={http_resolved!r:.200}"
+                )
+                # Retry affiliate API with the real URL (now has PID)
+                affiliate_retry = self._retry_flipkart_affiliate(
+                    http_resolved, config, job_id
+                )
+                if affiliate_retry is not None:
+                    return affiliate_retry
+                # Affiliate missed — still use resolved URL for cascade
+                url = http_resolved
+            else:
+                logger.warning(
+                    f"[ENGINE] flipkart short URL pre-resolution failed — "
+                    f"falling back to browser cascade with original URL"
+                )
+        # ── End Flipkart short URL pre-resolution ────────────────────────────
+
         last_response: Optional[ScrapeResponse] = None
         last_cause:    Optional[FailureCause]   = None
 
-        # resolved_url starts as the original URL.
+        # resolved_url starts as the original URL (may already be pre-resolved
+        # for Flipkart short URLs via HTTP above).
         # For amzn.in short URLs, Playwright follows the redirect during attempt 1
         # and page.url holds the real amazon.in/dp/ASIN URL after navigation —
         # even when the page itself is a bot-check page.
@@ -607,6 +644,61 @@ class ScraperEngine:
                     ctx.close()
                 except Exception:
                     pass
+
+    # ── Flipkart short URL HTTP resolution ───────────────────────────────────
+
+    def _resolve_flipkart_short_url(self, url: str) -> Optional[str]:
+        """
+        Resolve a dl.flipkart.com/s/ Firebase Dynamic Link to the real product
+        URL via a plain HTTP HEAD request (no browser, no JS rendering).
+
+        Firebase Dynamic Links honour standard HTTP redirects even from
+        datacenter IPs — unlike Flipkart's product pages which serve CAPTCHA
+        to Railway outbound IPs.
+
+        Returns the resolved URL string on success, or None on failure.
+        Never raises.
+        """
+        import requests as _requests
+
+        try:
+            logger.info(
+                f"[ENGINE] flipkart short URL HTTP resolve — url={url!r:.200}"
+            )
+            resp = _requests.head(
+                url,
+                allow_redirects=True,
+                timeout=10,
+                headers={
+                    # Minimal browser-like headers — avoids 403 on HEAD requests
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "en-IN,en;q=0.9",
+                },
+            )
+            final_url = resp.url
+            if final_url and "flipkart.com" in final_url and "dl.flipkart.com/s/" not in final_url:
+                logger.info(
+                    f"[ENGINE] flipkart short URL HTTP resolved — "
+                    f"final_url={final_url!r:.200} "
+                    f"status={resp.status_code} "
+                    f"hops={len(resp.history)}"
+                )
+                return final_url
+            logger.warning(
+                f"[ENGINE] flipkart short URL HTTP resolve — "
+                f"unexpected final_url={final_url!r:.200} status={resp.status_code}"
+            )
+            return None
+        except Exception as exc:
+            logger.warning(
+                f"[ENGINE] flipkart short URL HTTP resolve failed — "
+                f"error={type(exc).__name__}: {exc}"
+            )
+            return None
 
     # ── Flipkart affiliate retry after short URL resolution ──────────────────
 
