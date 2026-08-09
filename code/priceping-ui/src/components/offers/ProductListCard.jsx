@@ -1,91 +1,134 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/store/useAppStore'
 import { formatPrice, getPlatformBadgeClass, getPlatformLabel } from '@/lib/utils'
+import api from '@/lib/api'
 
 /**
  * ProductListCard — catalogue card for the /offers page.
  *
- * Distinct from dashboard ProductCard:
- *   - No subscription_id / delete button
- *   - Monitor button with 3 states (not tracking / tracking / no email)
- *   - Clicking card body → /products/{product_id}
- *   - Monitor button → /track?url=... (goes through full preview flow)
+ * Monitor flow (no scrape — product is already in DB):
+ *   - Email in store  → POST /v1/subscriptions/direct immediately
+ *   - No email        → show inline email prompt, then POST on submit
  *
- * Tracking state is read from the TanStack Query cache key ['items', userEmail]
- * populated by useItems() in OffersPageClient — zero extra API calls per card.
+ * Tracking state is read from TanStack Query cache ['items', userEmail].
  */
 export default function ProductListCard({ product }) {
-  const router = useRouter()
+  const router      = useRouter()
   const queryClient = useQueryClient()
-  const userEmail = useAppStore((state) => state.userEmail)
+  const userEmail   = useAppStore((s) => s.userEmail)
+  const setEmail    = useAppStore((s) => s.setUserEmail)
+
+  const [isSubscribing, setIsSubscribing]     = useState(false)
+  const [showEmailPrompt, setShowEmailPrompt] = useState(false)
+  const [emailInput, setEmailInput]           = useState('')
+  const [emailError, setEmailError]           = useState('')
+  const [toastMsg, setToastMsg]               = useState('')
 
   const {
-    product_id,
-    name,
-    image_url,
-    url,
-    platform,
-    current_price,
-    mrp,
-    special_price,
-    discount_pct,
-    availability,
-    rating,
-    review_count,
-    watcher_count,
-    all_time_low,
-    all_time_high,
+    product_id, name, image_url, url, platform,
+    current_price, mrp, special_price, discount_pct,
+    availability, rating, review_count,
+    watcher_count, all_time_low, all_time_high,
   } = product
 
-  // ── Tracking state — cache read, no API call ────────────────────────────
+  // ── Tracking state — cache read, no API call ──────────────────────────
   const cachedItems = queryClient.getQueryData(['items', userEmail])
-  const isTracking =
+  const isTracking  =
     !!userEmail &&
     (cachedItems?.items?.some(
-      (item) => item.product.product_id === product_id
+      (item) => item.product.product_id === product_id,
     ) ?? false)
 
-  // ── Price calculations ─────────────────────────────────────────────────
+  // ── Price calculations ────────────────────────────────────────────────
   const currentPriceNum = current_price ? Number(current_price) : null
   const mrpNum          = mrp           ? Number(mrp)           : null
-
-  const hasDiscount = mrpNum && currentPriceNum && mrpNum > currentPriceNum
+  const hasDiscount     = mrpNum && currentPriceNum && mrpNum > currentPriceNum
   const effectiveDiscountPct = discount_pct
     ? Math.round(Number(discount_pct))
     : hasDiscount
     ? Math.round(((mrpNum - currentPriceNum) / mrpNum) * 100)
     : null
-
-  const specialPriceNum = special_price ? Number(special_price) : null
+  const specialPriceNum  = special_price ? Number(special_price) : null
   const showSpecialPrice =
     specialPriceNum && currentPriceNum && specialPriceNum < currentPriceNum
-
-  // All-time low badge: only when there's a genuine price range and
-  // current price is at or below the recorded low.
   const atAllTimeLow =
-    all_time_low &&
-    all_time_high &&
+    all_time_low && all_time_high &&
     Number(all_time_low) < Number(all_time_high) &&
     currentPriceNum !== null &&
     currentPriceNum <= Number(all_time_low)
 
-  // ── Navigation helpers ─────────────────────────────────────────────────
-  const handleCardClick = () => router.push(`/products/${product_id}`)
+  // ── Subscribe helper ──────────────────────────────────────────────────
+  const showToast = (msg) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(''), 3000)
+  }
 
+  const doSubscribe = async (email) => {
+    setIsSubscribing(true)
+    try {
+      await api.post('/v1/subscriptions/direct', {
+        product_id,
+        email,
+      })
+      // Persist email in store if it came from the prompt
+      if (!userEmail) setEmail(email)
+      // Invalidate items cache so button flips to "✅ Monitoring"
+      await queryClient.invalidateQueries({ queryKey: ['items', email] })
+      showToast('You\'re now monitoring this product 🔔')
+      setShowEmailPrompt(false)
+    } catch (err) {
+      const msg =
+        err?.response?.data?.detail?.message ||
+        'Something went wrong. Please try again.'
+      showToast(msg)
+    } finally {
+      setIsSubscribing(false)
+    }
+  }
+
+  // ── Monitor button click ──────────────────────────────────────────────
   const handleMonitorClick = (e) => {
-    e.stopPropagation() // don't also trigger handleCardClick
-    if (isTracking) return
-    router.push(`/track?url=${encodeURIComponent(url)}`)
+    e.stopPropagation()
+    if (isTracking || isSubscribing) return
+    if (userEmail) {
+      doSubscribe(userEmail)
+    } else {
+      setShowEmailPrompt(true)
+    }
+  }
+
+  // ── Email prompt submit ───────────────────────────────────────────────
+  const handleEmailSubmit = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const trimmed = emailInput.trim()
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailError('Please enter a valid email address.')
+      return
+    }
+    setEmailError('')
+    doSubscribe(trimmed)
   }
 
   return (
     <div
-      className="card group flex cursor-pointer flex-col hover:shadow-md transition-shadow duration-200"
-      onClick={handleCardClick}
+      className="card group relative flex cursor-pointer flex-col hover:shadow-md transition-shadow duration-200"
+      onClick={() => router.push(`/products/${product_id}`)}
     >
+      {/* ── Toast ─────────────────────────────────────────────────────── */}
+      {toastMsg && (
+        <div
+          className="absolute inset-x-2 top-2 z-20 rounded-lg bg-slate-800 px-3 py-2 text-center text-xs font-medium text-white shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {toastMsg}
+        </div>
+      )}
+
       {/* ── Product image ─────────────────────────────────────────────── */}
       <div className="relative aspect-square w-full overflow-hidden rounded-t-xl bg-slate-50">
         {image_url ? (
@@ -100,13 +143,9 @@ export default function ProductListCard({ product }) {
             📦
           </div>
         )}
-
-        {/* Platform badge — top-left */}
         <span className={`absolute left-2 top-2 ${getPlatformBadgeClass(platform)}`}>
           {getPlatformLabel(platform)}
         </span>
-
-        {/* All-time low badge — top-right */}
         {atAllTimeLow && (
           <span className="absolute right-2 top-2 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 shadow-sm">
             🏆 All-time low
@@ -116,23 +155,18 @@ export default function ProductListCard({ product }) {
 
       {/* ── Card content ──────────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col gap-2.5 p-4">
-        {/* Availability */}
         <span
           className={`w-fit text-xs font-medium ${
-            availability
-              ? 'badge-in-stock'
-              : 'badge-out-of-stock'
+            availability ? 'badge-in-stock' : 'badge-out-of-stock'
           }`}
         >
           {availability ? 'In Stock' : 'Out of Stock'}
         </span>
 
-        {/* Product name — 2-line clamp */}
         <p className="line-clamp-2 text-sm font-medium leading-snug text-slate-800">
           {name || 'Unnamed Product'}
         </p>
 
-        {/* Price section */}
         <div className="space-y-0.5">
           <div className="flex flex-wrap items-baseline gap-2">
             <span className="price-large">
@@ -142,14 +176,11 @@ export default function ProductListCard({ product }) {
               <span className="price-drop-badge">{effectiveDiscountPct}% off</span>
             )}
           </div>
-
           {hasDiscount && (
             <p className="text-xs text-slate-400">
-              MRP{' '}
-              <span className="price-strike">{formatPrice(mrpNum)}</span>
+              MRP <span className="price-strike">{formatPrice(mrpNum)}</span>
             </p>
           )}
-
           {showSpecialPrice && (
             <p className="text-xs font-medium text-indigo-600">
               With bank offer: {formatPrice(specialPriceNum)}
@@ -157,7 +188,6 @@ export default function ProductListCard({ product }) {
           )}
         </div>
 
-        {/* Rating */}
         {rating && (
           <p className="text-xs text-slate-500">
             ⭐ {Number(rating).toFixed(1)}
@@ -167,7 +197,6 @@ export default function ProductListCard({ product }) {
           </p>
         )}
 
-        {/* Watcher count */}
         {watcher_count > 0 && (
           <p className="text-xs text-slate-400">
             👁 {watcher_count}{' '}
@@ -175,19 +204,68 @@ export default function ProductListCard({ product }) {
           </p>
         )}
 
-        {/* Monitor button — pushed to bottom of card */}
-        <button
-          onClick={handleMonitorClick}
-          disabled={isTracking}
-          className={`mt-auto w-full rounded-lg px-3 py-2 text-sm font-medium transition-colors
-            ${
-              isTracking
-                ? 'cursor-default bg-green-50 text-green-700'
-                : 'btn-primary'
-            }`}
-        >
-          {isTracking ? '✅ Monitoring' : '🔔 Monitor this'}
-        </button>
+        {/* ── Email prompt (shown when no email in store) ────────────── */}
+        {showEmailPrompt && (
+          <div
+            className="mt-1 rounded-lg border border-indigo-100 bg-indigo-50 p-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-2 text-xs font-medium text-indigo-800">
+              Enter your email to get price drop alerts
+            </p>
+            <form onSubmit={handleEmailSubmit} className="flex flex-col gap-1.5">
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full rounded-md border border-indigo-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                autoFocus
+              />
+              {emailError && (
+                <p className="text-[10px] text-red-500">{emailError}</p>
+              )}
+              <div className="flex gap-1.5">
+                <button
+                  type="submit"
+                  disabled={isSubscribing}
+                  className="flex-1 rounded-md bg-indigo-600 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {isSubscribing ? 'Adding…' : 'Monitor'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowEmailPrompt(false); setEmailError('') }}
+                  className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-500"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* ── Monitor button ─────────────────────────────────────────── */}
+        {!showEmailPrompt && (
+          <button
+            onClick={handleMonitorClick}
+            disabled={isTracking || isSubscribing}
+            className={`mt-auto w-full rounded-lg px-3 py-2 text-sm font-medium transition-colors
+              ${
+                isTracking
+                  ? 'cursor-default bg-green-50 text-green-700'
+                  : isSubscribing
+                  ? 'cursor-wait bg-indigo-100 text-indigo-400'
+                  : 'btn-primary'
+              }`}
+          >
+            {isTracking
+              ? '✅ Monitoring'
+              : isSubscribing
+              ? 'Adding…'
+              : '🔔 Monitor this'}
+          </button>
+        )}
       </div>
     </div>
   )

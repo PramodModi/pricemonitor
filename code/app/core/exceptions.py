@@ -48,6 +48,16 @@ class SubscriptionNotFoundError(PriceWatchError):
     def __init__(self, subscription_id: str) -> None:
         self.subscription_id = subscription_id
         super().__init__(f"Subscription not found: {subscription_id}")
+
+
+class ProductNotFoundError(PriceWatchError):
+    """
+    Raised when a product_id does not exist in the products table.
+    Maps to HTTP 404 / PRODUCT_NOT_FOUND.
+    """
+    def __init__(self, product_id: str) -> None:
+        self.product_id = product_id
+        super().__init__(f"Product not found: {product_id}")
 class DatabaseConnectionError(PriceWatchError):
     """
     Raised when the database is unreachable after exhausting retries.

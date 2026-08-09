@@ -1,19 +1,20 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.fastapi.schemas.subscription import SubscribeRequest, SubscriptionOut, DeleteSubscriptionOut
-from app.fastapi.schemas.product import ProductOut
+from app.fastapi.schemas.product import ProductOut, PriceStats
 from app.services.preview_cache import preview_cache
 from app.services.product_sync import ProductSyncService
 from app.services.subscription_service import SubscriptionService
 from app.core.exceptions import (
     PreviewNotFoundError,
     SubscriptionNotFoundError,
+    ProductNotFoundError,
 )
 from app.notifications.email_sender import EmailSender
-
 from app.utils.logging import get_logger
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
@@ -71,6 +72,76 @@ def subscribe(
         subscription_id=result.subscription_id,
         is_new_subscription=result.is_new_subscription,
         re_scraped=re_scraped,
+        product=ProductOut.model_validate(result.product),
+    )
+
+
+# ── Direct subscription (no preview / scrape required) ───────────────────────
+
+class DirectSubscribeRequest(BaseModel):
+    """Request body for POST /v1/subscriptions/direct."""
+    product_id: uuid.UUID
+    email: EmailStr
+
+
+@router.post(
+    "/direct",
+    response_model=SubscriptionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Subscribe to an existing product without scraping",
+)
+def subscribe_direct(
+    body: DirectSubscribeRequest,
+    db: Session = Depends(get_db),
+) -> SubscriptionOut:
+    """
+    Create (or silently confirm existing) subscription for a product already
+    in the DB. No preview_id or live scrape required.
+
+    Used by the /offers page "Monitor this" button — the product is already
+    known so there is no need to re-scrape it.
+
+    Raises:
+        404 PRODUCT_NOT_FOUND: product_id does not exist in products table.
+    """
+    svc = SubscriptionService(db)
+
+    try:
+        result = svc.subscribe_direct(
+            product_id=body.product_id,
+            email=str(body.email),
+        )
+    except ProductNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PRODUCT_NOT_FOUND",
+                "message": "Product not found.",
+            },
+        )
+
+    db.commit()
+
+    # Send confirmation email on new subscription only
+    if result.is_new_subscription:
+        try:
+            sender = EmailSender()
+            sender.send_subscription_confirmation(
+                to_email=str(body.email),
+                product_name=result.product.name or "Product",
+                product_image_url=result.product.image_url,
+                product_url=result.product.url,
+                current_price=result.product.current_price,
+                platform=result.product.platform,
+            )
+            logger.info(f"Confirmation email sent — to={str(body.email)}")
+        except Exception as exc:
+            logger.error(f"Confirmation email failed — error={str(exc)}")
+
+    return SubscriptionOut(
+        subscription_id=result.subscription_id,
+        is_new_subscription=result.is_new_subscription,
+        re_scraped=False,
         product=ProductOut.model_validate(result.product),
     )
 

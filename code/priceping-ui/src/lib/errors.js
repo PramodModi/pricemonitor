@@ -33,7 +33,7 @@ export const ERROR_MESSAGES = {
   CONNECTION_ERROR:
     'Cannot reach the server. Check your connection.',
   TIMEOUT:
-    'The request timed out — the scraper is taking longer than usual. Please try again.',
+    'The request timed out — the server is taking longer than usual. Please try again.',
 }
 
 /**

@@ -328,29 +328,68 @@ class ScraperEngine:
                     )
                     break
                 else:
-                    # For amzn.in short URLs, capture page.url after Playwright
-                    # follows the redirect — even on a CAPTCHA page, page.url
-                    # is already the real amazon.in/dp/ASIN URL.
-                    _page_url_out = (
-                        [url]
-                        if config.name == "amazon" and "amzn.in" in url
-                        else None
+                    # For short URLs (amzn.in, dl.flipkart.com/s/) capture
+                    # page.url after Playwright follows the redirect.
+                    # Even on a CAPTCHA page, page.url is already the real
+                    # product URL — used for ScraperAPI and (Flipkart only)
+                    # to retry the affiliate API with the extracted PID.
+                    _is_short_url = (
+                        (config.name == "amazon" and "amzn.in" in url)
+                        or (config.name == "flipkart" and "dl.flipkart.com/s/" in url)
                     )
+                    _page_url_out = [url] if _is_short_url else None
+
                     response = self._attempt_browser(
                         url, config, attempt, mechanism, job_id,
                         page_url_out=_page_url_out,
                     )
-                    # Update resolved_url so subsequent ScraperAPI/cached attempts
-                    # use the real URL instead of the short URL.
+
+                    # Update resolved_url from page.url after redirect follow
                     if _page_url_out is not None:
                         candidate = _page_url_out[0]
-                        if candidate and "amazon.in/dp/" in candidate and candidate != url:
+
+                        # Amazon: amzn.in → amazon.in/dp/ASIN
+                        if (
+                            config.name == "amazon"
+                            and candidate
+                            and "amazon.in/dp/" in candidate
+                            and candidate != url
+                        ):
                             resolved_url = candidate
                             logger.info(
                                 f"[ENGINE] amzn.in short URL resolved — "
                                 f"short={url!r:.80} "
                                 f"resolved={resolved_url!r:.200}"
                             )
+
+                        # Flipkart: dl.flipkart.com/s/ → flipkart.com/.../PID/...
+                        # After resolving: retry affiliate API with the real URL.
+                        # If affiliate hits → return immediately (free, fast, gets
+                        # MRP/special_price/bank offers).
+                        # If affiliate misses → resolved_url used for ScraperAPI.
+                        elif (
+                            config.name == "flipkart"
+                            and candidate
+                            and "flipkart.com" in candidate
+                            and "dl.flipkart.com/s/" not in candidate
+                            and candidate != url
+                        ):
+                            resolved_url = candidate
+                            logger.info(
+                                f"[ENGINE] dl.flipkart.com short URL resolved — "
+                                f"short={url!r:.80} "
+                                f"resolved={resolved_url!r:.200}"
+                            )
+                            # Only retry affiliate if the browser attempt failed.
+                            # When the browser succeeds, generic_scraper already
+                            # ran the post-redirect affiliate call internally —
+                            # calling it again here would double-bill API credits.
+                            if not response.success:
+                                affiliate_retry = self._retry_flipkart_affiliate(
+                                    resolved_url, config, job_id
+                                )
+                                if affiliate_retry is not None:
+                                    return affiliate_retry
             except Exception as exc:
                 # Unexpected error inside an attempt — log, treat as unknown, continue
                 logger.error(
@@ -568,6 +607,44 @@ class ScraperEngine:
                     ctx.close()
                 except Exception:
                     pass
+
+    # ── Flipkart affiliate retry after short URL resolution ──────────────────
+
+    def _retry_flipkart_affiliate(
+        self,
+        resolved_url: str,
+        config: PortalConfig,
+        job_id: str,
+    ) -> Optional[ScrapeResponse]:
+        """
+        After a dl.flipkart.com/s/ short URL is resolved to the real product
+        URL via page.url, attempt the Flipkart affiliate API with the resolved
+        URL (which now contains the real PID).
+
+        Returns a ScrapeResponse on hit, None on miss (caller falls through
+        to ScraperAPI).
+        """
+        for client in AFFILIATE_CLIENTS:
+            if client.can_handle(resolved_url):
+                logger.info(
+                    f"[ENGINE] flipkart affiliate retry — "
+                    f"resolved_url={resolved_url!r:.200}"
+                )
+                affiliate_result = client.fetch(resolved_url)
+                if affiliate_result is not None:
+                    logger.info(
+                        f"[ENGINE] flipkart affiliate retry HIT — "
+                        f"price={affiliate_result.price}"
+                    )
+                    return self._affiliate_result_to_scrape_response(
+                        affiliate_result, resolved_url, config, job_id
+                    )
+                logger.info(
+                    f"[ENGINE] flipkart affiliate retry MISS — "
+                    f"falling through to ScraperAPI"
+                )
+                break
+        return None
 
     # ── Attempt 4: cached page ────────────────────────────────────────────────
 
