@@ -319,15 +319,32 @@ class GenericScraper(BaseScraper):
                     except Exception:
                         pass
 
+                # FlipkartAffiliateClient.extract_product_id() prioritises
+                # ?pid= query param over the path-based itm... ID.
+                # Using itm... directly returns HTTP 404 from the affiliate API.
+                _affiliate_pid = None
                 if _pid_source_url:
-                    # FlipkartAffiliateClient.extract_product_id() prioritises
-                    # ?pid= query param over the path-based itm... ID.
-                    # Using itm... directly returns HTTP 404 from the affiliate API.
-                    _affiliate_pid = (
-                        _aff_client.extract_product_id(_pid_source_url)
-                        or product_id
-                    )
-                else:
+                    _affiliate_pid = _aff_client.extract_product_id(_pid_source_url)
+
+                # If canonical URL had no ?pid= (SEO canonical omits it),
+                # scan the raw HTML for ?pid=<UPPERCASE_ID> directly.
+                # ScraperAPI returns the full rendered page which contains
+                # ?pid=TVSH... in product links and JSON data.
+                if not _affiliate_pid:
+                    try:
+                        import re as _re
+                        _html = page.content()
+                        _pid_match = _re.search(r'[?&]pid=([A-Z0-9]{10,20})', _html)
+                        if _pid_match:
+                            _affiliate_pid = _pid_match.group(1)
+                            logger.info(
+                                f"[AFFILIATE] pid extracted from raw HTML — "
+                                f"pid={_affiliate_pid}"
+                            )
+                    except Exception:
+                        pass
+
+                if not _affiliate_pid:
                     _affiliate_pid = product_id
 
                 if _affiliate_pid:
