@@ -277,6 +277,16 @@ class ScraperEngine:
         last_response: Optional[ScrapeResponse] = None
         last_cause:    Optional[FailureCause]   = None
 
+        # resolved_url starts as the original URL.
+        # For amzn.in short URLs, Playwright follows the redirect during attempt 1
+        # and page.url holds the real amazon.in/dp/ASIN URL after navigation —
+        # even when the page itself is a bot-check page.
+        # We capture that resolved URL and use it for all ScraperAPI attempts,
+        # so ScraperAPI never has to follow a short URL redirect itself
+        # (which it does inconsistently — returning 3506 bytes instead of the
+        # real product page on ~50% of attempts).
+        resolved_url = url
+
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             mechanism = self._pick_mechanism(attempt, last_cause, config)
 
@@ -308,9 +318,9 @@ class ScraperEngine:
             # ── Dispatch to the right attempt handler ─────────────────────────
             try:
                 if mechanism == RetryMechanism.CACHED_PAGE:
-                    response = self._attempt_cached_page(url, config, attempt, job_id)
+                    response = self._attempt_cached_page(resolved_url, config, attempt, job_id)
                 elif mechanism == RetryMechanism.SCRAPERAPI:
-                    response = self._attempt_scraperapi(url, config, attempt, job_id)
+                    response = self._attempt_scraperapi(resolved_url, config, attempt, job_id)
                 elif mechanism == RetryMechanism.GIVE_UP:
                     logger.error(
                         f"[ATTEMPT] give_up — no ScraperAPI key configured, "
@@ -318,7 +328,29 @@ class ScraperEngine:
                     )
                     break
                 else:
-                    response = self._attempt_browser(url, config, attempt, mechanism, job_id)
+                    # For amzn.in short URLs, capture page.url after Playwright
+                    # follows the redirect — even on a CAPTCHA page, page.url
+                    # is already the real amazon.in/dp/ASIN URL.
+                    _page_url_out = (
+                        [url]
+                        if config.name == "amazon" and "amzn.in" in url
+                        else None
+                    )
+                    response = self._attempt_browser(
+                        url, config, attempt, mechanism, job_id,
+                        page_url_out=_page_url_out,
+                    )
+                    # Update resolved_url so subsequent ScraperAPI/cached attempts
+                    # use the real URL instead of the short URL.
+                    if _page_url_out is not None:
+                        candidate = _page_url_out[0]
+                        if candidate and "amazon.in/dp/" in candidate and candidate != url:
+                            resolved_url = candidate
+                            logger.info(
+                                f"[ENGINE] amzn.in short URL resolved — "
+                                f"short={url!r:.80} "
+                                f"resolved={resolved_url!r:.200}"
+                            )
             except Exception as exc:
                 # Unexpected error inside an attempt — log, treat as unknown, continue
                 logger.error(
@@ -460,6 +492,7 @@ class ScraperEngine:
         attempt: int,
         mechanism: RetryMechanism,
         job_id: str,
+        page_url_out: Optional[list] = None,
     ) -> ScrapeResponse:
         """
         Run one browser-based attempt.
@@ -471,6 +504,10 @@ class ScraperEngine:
             - Myntra or Firefox engine → NO user_agent override
               (Firefox TLS profile must match the Firefox UA)
             - Chromium + other portals → explicit Chrome UA + Sec-Fetch headers
+
+        page_url_out: optional single-element list. When provided, the resolved
+            page.url after navigation is written to page_url_out[0]. Used by
+            _scrape_inner to capture the real URL after an amzn.in redirect.
         """
         use_firefox = (
             mechanism == RetryMechanism.FIREFOX
@@ -495,10 +532,16 @@ class ScraperEngine:
             try:
                 ctx  = self._build_context(browser, config, persona, use_firefox=True)
                 page = ctx.new_page()
-                return self._scraper.scrape(
+                response = self._scraper.scrape(
                     page=page, url=url, config=config,
                     job_id=job_id, attempt_number=attempt,
                 )
+                if page_url_out is not None:
+                    try:
+                        page_url_out[0] = page.url
+                    except Exception:
+                        pass
+                return response
             finally:
                 try:
                     browser.close()
@@ -510,10 +553,16 @@ class ScraperEngine:
             try:
                 page = ctx.new_page()
                 self._apply_stealth(page)
-                return self._scraper.scrape(
+                response = self._scraper.scrape(
                     page=page, url=url, config=config,
                     job_id=job_id, attempt_number=attempt,
                 )
+                if page_url_out is not None:
+                    try:
+                        page_url_out[0] = page.url
+                    except Exception:
+                        pass
+                return response
             finally:
                 try:
                     ctx.close()
