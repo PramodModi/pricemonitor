@@ -122,7 +122,7 @@ logger = get_logger(__name__)
 # inside Playwright. If the timeout expires the request returns a 503 so
 # the frontend can show a "try again" message instead of a 35-second hang.
 _SCRAPE_SEMAPHORE = threading.Semaphore(1)
-_SCRAPE_QUEUE_TIMEOUT_S = 60   # max seconds a queued scrape will wait
+_SCRAPE_QUEUE_TIMEOUT_S = 120   # max seconds a queued scrape will wait
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
