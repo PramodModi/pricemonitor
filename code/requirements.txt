@@ -12,3 +12,4 @@ apscheduler
 email-validator
 requests
 pyyaml
+tavily-python
