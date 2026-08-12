@@ -14,6 +14,8 @@ from app.workers.worker_manager import WorkerManager
 from app.workers.email_worker import EmailWorker
 from app.scheduler.run_manager import RunManager
 from app.fastapi.api.v1 import debug_scrape
+from app.fastapi.api.v1 import search
+from app.fastapi.api.v1 import search_by_name
 from app.utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -115,6 +117,8 @@ def create_app() -> FastAPI:
     app.include_router(runs.router, prefix=prefix)
     app.include_router(internal.router, prefix=prefix)
     app.include_router(debug_scrape.router, prefix=prefix)
+    app.include_router(search.router, prefix=prefix)
+    app.include_router(search_by_name.router, prefix=prefix)
 
     return app
 

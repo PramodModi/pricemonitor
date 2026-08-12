@@ -21,6 +21,57 @@ router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 logger = get_logger(__name__)
 
 
+def _get_cross_portal_listings(db: Session, product_id: uuid.UUID) -> list[dict]:
+    """
+    Return other portal listings for the same canonical product. (v5.2)
+
+    After a user subscribes, the frontend checks this to show Option B
+    suggestion: "Also on Flipkart — ₹72,999 (last checked 3h ago)".
+
+    Returns a list of dicts for other platforms where the same canonical
+    product is tracked. Empty list when:
+      - Product has no canonical_id (not identity-linked yet)
+      - No other portal listings exist for this canonical
+    """
+    from sqlalchemy import select
+    from app.core.models.product import Product
+
+    # Get the subscribed product's canonical_id
+    subscribed = db.get(Product, product_id)
+    if subscribed is None or subscribed.canonical_id is None:
+        return []
+
+    # Find other portal listings for the same canonical
+    rows = db.execute(
+        select(
+            Product.product_id,
+            Product.platform,
+            Product.current_price,
+            Product.mrp,
+            Product.url,
+            Product.availability,
+            Product.last_checked_at,
+        ).where(
+            Product.canonical_id == subscribed.canonical_id,
+            Product.product_id != product_id,          # exclude the subscribed one
+            Product.current_price.isnot(None),         # must have a known price
+        ).order_by(Product.current_price.asc())        # cheapest first
+    ).mappings().all()
+
+    return [
+        {
+            "product_id":      str(row["product_id"]),
+            "platform":        row["platform"],
+            "current_price":   float(row["current_price"]),
+            "mrp":             float(row["mrp"]) if row["mrp"] else None,
+            "url":             row["url"],
+            "availability":    row["availability"],
+            "last_checked_at": row["last_checked_at"].isoformat() if row["last_checked_at"] else None,
+        }
+        for row in rows
+    ]
+
+
 @router.post(
     "",
     response_model=SubscriptionOut,
@@ -73,6 +124,7 @@ def subscribe(
         is_new_subscription=result.is_new_subscription,
         re_scraped=re_scraped,
         product=ProductOut.model_validate(result.product),
+        cross_portal_listings=_get_cross_portal_listings(db, result.product.product_id),
     )
 
 
@@ -143,6 +195,7 @@ def subscribe_direct(
         is_new_subscription=result.is_new_subscription,
         re_scraped=False,
         product=ProductOut.model_validate(result.product),
+        cross_portal_listings=_get_cross_portal_listings(db, result.product.product_id),
     )
 
 

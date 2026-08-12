@@ -11,12 +11,19 @@ in Railway environment variables and redeploy.
 
 Both paths share the same _write_result() and browser lifecycle — only
 _process_job() branches on the flag.
+
+v4.9 changes:
+  - RunManager passes canonical_url to ScrapeJob when available.
+  - _process_job_v2() uses job.canonical_url (falling back to job.url)
+    so the engine never receives an unresolved short URL on cron runs.
+  - _write_result() calls update_canonical_url() when a scrape resolves
+    a product_id that implies a known canonical URL — backfills pre-v4.9 rows.
 """
 
 import queue
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Optional
@@ -34,18 +41,24 @@ from app.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# ── Job dataclasses (unchanged — consumed by RunManager and EmailWorker) ──────
+# ── Job dataclasses ────────────────────────────────────────────────────────────
 
 @dataclass
 class ScrapeJob:
     """
     One unit of work dequeued from scrape_queue by a ScraperWorker.
     Published by RunManager at the start of each scraper cycle.
+
+    v4.9: canonical_url added — the resolved clean desktop URL for this product.
+    When set, the worker passes this to ScraperEngine instead of `url` (which
+    may contain a short URL or affiliate params). Falls back to `url` when None
+    (products created before v4.9 that haven't been resolved yet).
     """
     product_id: uuid.UUID
-    url: str
+    url: str                              # affiliated URL (stored in DB)
     platform: str
     run_id: uuid.UUID
+    canonical_url: Optional[str] = field(default=None)   # v4.9 NEW
 
 
 @dataclass
@@ -118,12 +131,9 @@ class ScraperWorker:
         Main worker loop. Launched as a daemon thread by WorkerManager.
 
         Branches on use_scraper_v2:
-          v2 — ScraperEngine owns Playwright entirely. The worker must NOT
-               call sync_playwright() — doing so would open a second Playwright
-               instance in the same thread, which raises:
-               "Playwright Sync API inside the asyncio loop"
-               (even outside asyncio, two sync_playwright() calls in one thread
-               conflict). ScraperEngine starts and stops its own instance per job.
+          v2 — ScraperEngine owns the full Playwright + browser lifecycle.
+               Worker holds no Playwright instance of its own. _loop() calls
+               _process_job_v2() which opens a ScraperEngine context manager per job.
           v1 — Worker owns Playwright and a long-lived Chromium browser.
                Preserved intact for rollback (USE_SCRAPER_V2=false).
         """
@@ -204,18 +214,28 @@ class ScraperWorker:
         thin caller — it passes the URL, receives a ScrapeResponse, writes
         the diagnostic row, then hands the result to _write_result().
 
+        v4.9: uses job.canonical_url when available (clean resolved desktop URL)
+        so the engine never receives an unresolved short URL.
+        Falls back to job.url for products created before v4.9.
+
         When scraper_v3 arrives, only engine.py changes. This method and
         everything above it stays untouched.
         """
+        # v4.9: prefer canonical_url over url for the scrape
+        # canonical_url = clean resolved URL (no short URL, no affiliate params)
+        # url           = affiliated URL stored in DB (may be a short URL for pre-v4.9 rows)
+        scrape_url = job.canonical_url or job.url
+
         logger.info(
             f"v2 scrape start — "
             f"worker_id={self.worker_id} "
             f"product_id={str(job.product_id)} "
-            f"url={job.url}"
+            f"url={scrape_url!r:.100} "
+            f"canonical={'yes' if job.canonical_url else 'no (using product.url)'}"
         )
 
         with ScraperEngine() as engine:
-            response = engine.scrape(job.url)
+            response = engine.scrape(scrape_url)
 
         self._write_diagnostic(
             job, response,
@@ -329,6 +349,13 @@ class ScraperWorker:
             current_price, name, brand, image_url, availability,
             rating, review_count, seller.
 
+        v4.9: after a successful scrape, backfills canonical_url for
+        pre-v4.9 product rows that have canonical_url=NULL. The canonical
+        URL is derived from the scrape result's marketplace_product_id when
+        the platform has a deterministic canonical URL pattern (Amazon/Myntra).
+        For Flipkart, canonical_url was already set at preview time via
+        the resolver since PID is required for the affiliate API.
+
         Opens its own DB session — workers are long-lived threads that run
         outside the FastAPI request lifecycle.
         """
@@ -347,8 +374,6 @@ class ScraperWorker:
 
             # ── Scrape failed ─────────────────────────────────────────────────
             if result is None:
-                # Determine status: v1 uses exception type; v2 always passes
-                # None here when all attempts failed (error_type logged earlier)
                 from app.core.exceptions import ScrapeBotDetectedError as V1BotError
                 scrape_status = (
                     "blocked"
@@ -370,7 +395,7 @@ class ScraperWorker:
                 db.commit()
                 return
 
-            # ── Scrape succeeded — detect price change ─────────────────────────
+            # ── Scrape succeeded ──────────────────────────────────────────────
             old_price = product.current_price
             new_price = result.current_price
             price_dropped = old_price is not None and new_price < old_price
@@ -412,10 +437,7 @@ class ScraperWorker:
                 },
             )
 
-            # Write affiliate enrichment fields when present.
-            # Only populated for Flipkart via affiliate API (extraction_method='affiliate_api').
-            # For browser-scraped results all values are None — update_affiliate_data()
-            # skips None values so previously stored affiliate data is never overwritten.
+            # Write affiliate enrichment fields when present
             affiliate_mrp           = getattr(result, "mrp", None)
             affiliate_special_price = getattr(result, "special_price", None)
             affiliate_discount_pct  = getattr(result, "discount_pct", None)
@@ -439,10 +461,7 @@ class ScraperWorker:
                     f"offers_count={len(affiliate_offers)}"
                 )
 
-            # Write extended metadata (JSONB) — merge with existing so that
-            # richer API data is never overwritten by a browser fallback scrape
-            # that could not extract all fields.
-            # merge_metadata(existing, incoming): existing keys win on conflict.
+            # Write extended metadata (JSONB) — merge with existing
             incoming_metadata = getattr(result, "product_metadata", None) or {}
             if incoming_metadata:
                 from app.scraper_v2.engine import ScraperEngine
@@ -458,10 +477,7 @@ class ScraperWorker:
                     f"keys={list(merged.keys())}"
                 )
 
-            # Write unified category — populated by generic_scraper from
-            # product_metadata["category"]. Only updates when non-None and
-            # not "other" so a failed classification never overwrites a
-            # previously correct category.
+            # Write unified category
             incoming_category = getattr(result, "category", None)
             if incoming_category and incoming_category != "other":
                 product_repo.update_category(product, incoming_category)
@@ -472,8 +488,81 @@ class ScraperWorker:
                     f"category={incoming_category}"
                 )
             elif incoming_category == "other" and product.category == "other":
-                # Both old and new are 'other' — write to confirm classification ran.
                 product_repo.update_category(product, "other")
+
+            # v5.1 DEF-001: run identity service when canonical_id is None ─────
+            # Products created before v5.0 have canonical_id=NULL. On each
+            # successful cron scrape we attempt to link them. Once linked,
+            # canonical_id is non-NULL and this block is a no-op thereafter.
+            # Never raises — identity failure must never abort a scrape.
+            if product.canonical_id is None:
+                try:
+                    from app.services.product_identity import product_identity_service
+                    from app.repositories.product_repo import ProductRepository as _PR
+                    specs = (getattr(result, "product_metadata", None) or {}).get("specs", {})
+                    canonical = product_identity_service.find_or_create_canonical(
+                        db=db,
+                        platform=product.platform,
+                        name=result.name,
+                        brand=result.brand,
+                        category=getattr(result, "category", None) or product.category or "other",
+                        image_url=result.image_url,
+                        specs=specs,
+                    )
+                    if canonical:
+                        product_repo.update_canonical_id(product, canonical.canonical_id)
+                        # Backfill model_number — prefer specs extraction, fall back to canonical
+                        model_number = product_identity_service.extract_model_number(specs)
+                        if model_number is None:
+                            model_number = canonical.model_number
+                        normalized = product_identity_service.normalize_name(
+                            result.name or "", result.brand or "", specs
+                        )
+                        if model_number:
+                            product_repo.update_model_number(product, model_number)
+                        if normalized:
+                            product_repo.update_normalized_name(product, normalized)
+                        logger.info(
+                            f"Identity linked (cron) — "
+                            f"worker_id={self.worker_id} "
+                            f"product_id={str(job.product_id)} "
+                            f"canonical_id={canonical.canonical_id} "
+                            f"model_number={model_number!r}"
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        f"Identity service failed in cron (non-critical) — "
+                        f"worker_id={self.worker_id} "
+                        f"product_id={str(job.product_id)} "
+                        f"error={type(exc).__name__}: {exc}"
+                    )
+
+            # v4.9: backfill canonical_url for pre-v4.9 rows ──────────────────
+            # When canonical_url is NULL (product created before v4.9),
+            # derive it from the scrape result's marketplace_product_id.
+            # Only runs when:
+            #   1. Product row has no canonical_url yet
+            #   2. Scrape returned a marketplace_product_id
+            #   3. Platform has a deterministic canonical URL pattern
+            #
+            # Amazon: canonical = amazon.in/dp/{ASIN} — always deterministic
+            # Flipkart: canonical needs pid= — set at preview time by resolver
+            #           If still NULL here, leave it (pid may not be in job.url)
+            # Myntra: canonical = myntra.com/{path}/{id}/buy — deterministic
+            if not product.canonical_url:
+                scraped_pid = getattr(result, "marketplace_product_id", None)
+                if scraped_pid:
+                    if product.platform == "amazon":
+                        backfill_url = f"https://www.amazon.in/dp/{scraped_pid}"
+                        product_repo.update_canonical_url(product, backfill_url)
+                        logger.info(
+                            f"canonical_url backfilled — "
+                            f"worker_id={self.worker_id} "
+                            f"product_id={str(job.product_id)} "
+                            f"canonical_url={backfill_url}"
+                        )
+                    # Flipkart and Myntra: resolver sets canonical_url at preview time.
+                    # If still NULL after scrape, leave for next preview to resolve.
 
             ph_repo.insert(
                 product_id=job.product_id,
@@ -521,7 +610,6 @@ class ScraperWorker:
             try:
                 repo = ScrapeDiagnosticRepository(db)
 
-                # Derive status string from response.success boolean
                 if response.success:
                     status = "success"
                 elif response.error_type is not None:
@@ -540,7 +628,7 @@ class ScraperWorker:
                     product_id=job.product_id,
                     run_id=job.run_id,
                     portal=response.portal,
-                    url=job.url,
+                    url=job.canonical_url or job.url,   # v4.9: log the URL actually scraped
                     status=status,
                     price_found=response.current_price if response.success else None,
                     worker_id=response.worker_id,

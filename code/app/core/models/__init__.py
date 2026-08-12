@@ -4,6 +4,7 @@ from app.core.models.subscription import Subscription
 from app.core.models.price_history import PriceHistory
 from app.core.models.notification_log import NotificationLog
 from app.core.models.scheduler_run import SchedulerRun
+from app.core.models.canonical_product import CanonicalProduct
 
 __all__ = [
     "User",

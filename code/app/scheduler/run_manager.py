@@ -78,6 +78,7 @@ class RunManager:
                     url=product.url,
                     platform=product.platform,
                     run_id=run.run_id,
+                    canonical_url=product.canonical_url,  # v4.9 — use resolved URL, falls back to url when None
                 ))
             logger.info(f"Enqueued {total} scrape jobs")
 

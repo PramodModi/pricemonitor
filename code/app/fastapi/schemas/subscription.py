@@ -15,6 +15,10 @@ class SubscriptionOut(BaseModel):
     is_new_subscription: bool
     re_scraped: bool
     product: ProductOut
+    # v5.2 — other portal listings for the same canonical product.
+    # Used by the frontend to show Option B cross-portal suggestion card.
+    # Optional with None default — fully backward-compatible with Streamlit.
+    cross_portal_listings: Optional[list[dict]] = None
 
 
 class ItemOut(BaseModel):

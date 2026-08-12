@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Boolean, Integer, Numeric, String, Text, TIMESTAMP, UniqueConstraint, text
+from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text, TIMESTAMP, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,15 @@ class Product(Base):
         server_default=text("gen_random_uuid()"),
     )
     url: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # ── Resolved canonical URL (v4.9) ─────────────────────────────────────────
+    canonical_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    """
+    Clean resolved desktop URL for scraping.
+    Set by URLResolver at preview time. NULL for products created before v4.9.
+    Cron scraper uses this in preference to `url` (which has affiliate params).
+    """
+
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
     marketplace_product_id: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -50,37 +59,62 @@ class Product(Base):
     offers: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text()), nullable=True)
 
     # ── Extended product metadata (portal-specific, variable shape) ────────────
-    # Populated by affiliate API (Flipkart) and browser scraper (all portals).
-    # Schema: {
-    #   "description":     str,
-    #   "images":          [str, ...],
-    #   "category":        str,
-    #   "subcategory":     str,
-    #   "specs":           {key: value, ...},
-    #   "features":        [str, ...],        -- Flipkart / Amazon bullet points
-    #   "sizes_available": [str, ...],        -- Myntra only
-    #   "material":        str,               -- Myntra only
-    #   "fit":             str,               -- Myntra only
-    #   "style_notes":     str,               -- Myntra only
-    # }
-    # Keys absent for a portal are simply missing — not null.
-    # Merged on update: existing keys preserved when new scrape cannot provide them.
     # NOTE: 'metadata' is reserved by SQLAlchemy Declarative API — attribute is
     # named product_metadata; DB column name stays 'metadata' via name= param.
     product_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 
     # ── Unified category ───────────────────────────────────────────────────────
-    # Mapped from product_metadata["category"] by CategoryMapper at scrape time.
-    # One of: mobiles, electronics, fashion, home, beauty, sports, books, toys, other.
-    # Default 'other' — all existing rows remain valid after migration.
     category: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="other"
     )
+
+    # ── Product Identity Graph (v5.0) ──────────────────────────────────────────
+    canonical_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("canonical_products.canonical_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    """
+    FK to canonical_products. Links this portal listing to the real-world product
+    it represents. NULL for products created before v5.0 — backfilled on next
+    successful scrape via ProductIdentityService.find_or_create_canonical().
+
+    ondelete=SET NULL: if a canonical_product row is deleted (shouldn't happen
+    in normal operation), the listing becomes unlinked rather than cascade-deleted.
+    """
+
+    model_number: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    """
+    Manufacturer model number extracted from product_metadata["specs"] at scrape
+    time. e.g. "SM-S921BZDGINS", "AH8050-002", "MU7N3HN/A".
+
+    Stored here (on the listing) as well as on canonical_products so it can be
+    extracted and compared without a JOIN when processing a new scrape result.
+    Also used as the signal to trigger cross-portal matching:
+        SELECT canonical_id FROM products
+        WHERE model_number = :model_number AND platform != :platform
+    """
+
+    normalized_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    """
+    Product name with variant specs stripped.
+    e.g. "Samsung Galaxy S24 5G" from "SAMSUNG Galaxy S24 5G (8GB, 128GB) | AI Phone"
+
+    Stored for:
+      1. Display on canonical product cards (consistent across portals)
+      2. Fuzzy name-similarity matching when model_number is absent (fashion, etc.)
+      3. PostgreSQL trigram search index (v5.1)
+    """
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
 
+    # ── Relationships ──────────────────────────────────────────────────────────
+    canonical_product: Mapped[Optional["CanonicalProduct"]] = relationship(
+        "CanonicalProduct", back_populates="listings"
+    )
     subscriptions: Mapped[list["Subscription"]] = relationship(
         "Subscription", back_populates="product"
     )

@@ -12,6 +12,8 @@ from app.fastapi.schemas.product import (
     ProductListItem, ProductListOut,
 )
 from app.services.url_validator import url_validator
+from app.services.url_resolver import url_resolver          # v4.9 — NEW
+from app.services.product_identity import product_identity_service  # v5.0 — NEW
 from app.services.preview_cache import preview_cache, ProductSnapshot
 from app.services.product_sync import _build_affiliated_url
 from app.repositories.product_repo import ProductRepository
@@ -49,6 +51,12 @@ def _background_scrape_and_store(
 
     Opens its own DB session (runs outside the request lifecycle).
     Silently swallows all errors — must never crash the server.
+
+    v4.9: receives `url` which is already the canonical_url (resolved URL)
+    when the product was created/updated via PATH B. For older products
+    created before v4.9, `url` is product.canonical_url or product.url
+    (scraper_worker handles the fallback — this function always receives
+    the best URL available from the caller).
     """
     from app.core.database import SessionLocal
 
@@ -220,17 +228,24 @@ def preview_product(
 
     PATH B — new product (URL not in catalog):
         Run a live scrape, return scraped data. data_source = "live_scrape".
-        Unchanged from pre-v2.8 behaviour.
 
-    No database writes occur at this step.
+    v4.9 changes:
+        Step 1b (NEW) — URLResolver runs after validation and before DB lookup.
+        For short URLs (amzn.in, dl.flipkart.com/s/, onelink.me), this resolves
+        to a canonical desktop URL + product_id before any scrape or DB write.
+        The resolved product_id is used for the DB lookup so PATH A works even
+        when the user pastes a short URL for a product already in the catalog.
+        The canonical_url is saved to the product row so the cron scraper never
+        re-resolves the same short URL again (fixes DEF-001).
     """
     # ── Step 1 — validate URL ─────────────────────────────────────────────────
     try:
         validated = url_validator.validate(body.url)
         logger.info(
-            f"Validated URL — canonical={validated.canonical_url} "
+            f"[PREVIEW] validated — "
+            f"canonical={validated.canonical_url} "
             f"platform={validated.platform} "
-            f"id={validated.marketplace_product_id}"
+            f"id={validated.marketplace_product_id!r}"
         )
     except InvalidURLError as exc:
         raise HTTPException(
@@ -250,13 +265,43 @@ def preview_product(
             },
         )
 
-    # ── Step 2 — DB lookup FIRST ──────────────────────────────────────────────
+    # ── Step 1b — resolve URL (v4.9 NEW) ─────────────────────────────────────
+    # Runs after validation (portal is known) but before DB lookup or scrape.
+    # For clean URLs (already have ASIN/PID/catalog_id in the path) this is
+    # pure regex — no network call, <1ms.
+    # For short URLs (amzn.in, dl.flipkart.com/s/, onelink.me) this follows
+    # redirects or fetches HTML to extract the product ID. Takes 200ms–8s.
+    #
+    # resolved.product_id overrides validated.marketplace_product_id when non-None.
+    # resolved.canonical_url overrides validated.canonical_url when method != "passthrough".
+    # On resolution failure, both fall back to the validated values unchanged.
+    resolved = url_resolver.resolve(validated.canonical_url, validated.platform)
+
+    logger.info(
+        f"[PREVIEW] url_resolver — "
+        f"method={resolved.method} "
+        f"confidence={resolved.confidence:.2f} "
+        f"product_id={resolved.product_id!r} "
+        f"canonical={resolved.canonical_url!r:.100}"
+    )
+
+    # Effective values used for all downstream operations
+    effective_product_id    = resolved.product_id or validated.marketplace_product_id
+    effective_canonical_url = (
+        resolved.canonical_url
+        if resolved.method != "passthrough"
+        else validated.canonical_url
+    )
+
+    # ── Step 2 — DB lookup with resolved product_id ───────────────────────────
+    # Uses effective_product_id so PATH A triggers correctly even when the
+    # user pastes a short URL for a product already tracked via a full URL.
     product_repo = ProductRepository(db)
     existing = None
-    if validated.marketplace_product_id:
+    if effective_product_id:
         existing = product_repo.get_by_platform_and_marketplace_id(
             validated.platform,
-            validated.marketplace_product_id,
+            effective_product_id,
         )
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -264,9 +309,29 @@ def preview_product(
     # ═════════════════════════════════════════════════════════════════════════
     if existing is not None:
         logger.info(
-            f"Preview PATH A (DB hit) — product_id={existing.product_id} "
+            f"[PREVIEW] PATH A (DB hit) — "
+            f"product_id={existing.product_id} "
             f"platform={existing.platform}"
         )
+
+        # v4.9: backfill canonical_url on existing products that were created
+        # before this version (canonical_url was NULL). Only writes when the
+        # resolver actually resolved something (method != passthrough) and the
+        # product doesn't already have a canonical_url stored.
+        if (
+            resolved.method != "passthrough"
+            and effective_canonical_url
+            and not existing.canonical_url
+        ):
+            product_repo.update_canonical_url(existing, effective_canonical_url)
+            try:
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                logger.warning(
+                    f"[PREVIEW] PATH A — canonical_url backfill failed — "
+                    f"product_id={existing.product_id} error={exc}"
+                )
 
         live_data = LiveData(
             marketplace_product_id=existing.marketplace_product_id,
@@ -303,19 +368,20 @@ def preview_product(
         )
         preview_cache.store(snapshot)
 
-        # ── Trigger background scrape to refresh DB data ──────────────────────
-        # PATH A returns instantly with DB data. The background task scrapes
-        # the live URL and updates price + metadata + affiliate fields in DB.
-        # When the user clicks 🔄 Refresh, get_product() reads the fresh data.
+        # Trigger background scrape to refresh DB data.
+        # v4.9: pass canonical_url when available — the scraper gets a clean
+        # desktop URL instead of the short URL stored in product.url.
+        scrape_url = existing.canonical_url or existing.url
         background_tasks.add_task(
             _background_scrape_and_store,
             product_id=existing.product_id,
-            url=existing.url,
+            url=scrape_url,
             platform=existing.platform,
         )
         logger.info(
             f"[PREVIEW] PATH A — background scrape queued — "
-            f"product_id={existing.product_id}"
+            f"product_id={existing.product_id} "
+            f"scrape_url={scrape_url!r:.100}"
         )
 
         return PreviewResponse(
@@ -328,17 +394,22 @@ def preview_product(
         )
 
     # ═════════════════════════════════════════════════════════════════════════
-    # PATH B — new product: live scrape (unchanged from pre-v2.8)
+    # PATH B — new product: live scrape
     # ═════════════════════════════════════════════════════════════════════════
     logger.info(
-        f"Preview PATH B (DB miss, live scrape) — url={validated.canonical_url} "
+        f"[PREVIEW] PATH B (DB miss, live scrape) — "
+        f"url={effective_canonical_url!r:.100} "
         f"platform={validated.platform}"
     )
 
     try:
         if settings.use_scraper_v2:
             with ScraperEngine() as engine:
-                result = engine.scrape(validated.canonical_url)
+                # v4.9: pass effective_canonical_url (resolved clean URL) to engine.
+                # For short URLs this is the real amazon.in/dp/ASIN or
+                # flipkart.com/...?pid=... URL — no redirect chase needed.
+                # For clean URLs this is identical to validated.canonical_url.
+                result = engine.scrape(effective_canonical_url)
 
             # Write diagnostic row — preview path
             try:
@@ -356,7 +427,7 @@ def preview_product(
                 diag_repo.insert(
                     scrape_job_id=uuid.uuid4(),
                     portal=validated.platform,
-                    url=validated.canonical_url,
+                    url=effective_canonical_url,
                     status=diag_status,
                     trigger="preview",
                     triggered_by=None,
@@ -376,17 +447,15 @@ def preview_product(
                 db.commit()
             except Exception as diag_exc:
                 db.rollback()
-                logger.warning(f"Failed to write preview diagnostic — error={str(diag_exc)}")
+                logger.warning(f"[PREVIEW] failed to write diagnostic — error={str(diag_exc)}")
 
             if not result.success:
                 logger.error(
-                    f"Scrape failed — url={validated.canonical_url} "
+                    f"[PREVIEW] scrape failed — "
+                    f"url={effective_canonical_url!r:.100} "
                     f"error_type={result.error_type} "
                     f"error={result.error_message}"
                 )
-                # Semaphore queue timeout — another scrape was already in progress.
-                # Return 503 so the frontend shows "try again" immediately instead
-                # of waiting for the Axios 35s timeout to expire.
                 from app.scraper_v2.models.scrape_result import ScrapeFailureReason
                 if result.error_type == ScrapeFailureReason.TIMEOUT and (
                     result.error_message and "queue" in (result.error_message or "").lower()
@@ -429,7 +498,7 @@ def preview_product(
                 page = context.new_page()
                 Stealth().apply_stealth_sync(page)
                 try:
-                    result = scraper.extract(page, validated.canonical_url)
+                    result = scraper.extract(page, effective_canonical_url)
                 finally:
                     context.close()
                     browser.close()
@@ -437,7 +506,7 @@ def preview_product(
     except HTTPException:
         raise
     except ScrapeBotDetectedError as exc:
-        logger.error(f"Bot detected — url={validated.canonical_url} error={str(exc)}")
+        logger.error(f"[PREVIEW] bot detected — url={effective_canonical_url!r:.100} error={str(exc)}")
         raise HTTPException(
             status_code=502,
             detail={
@@ -446,7 +515,7 @@ def preview_product(
             },
         )
     except ScrapeError as exc:
-        logger.error(f"Scrape failed — url={validated.canonical_url} error={str(exc)}")
+        logger.error(f"[PREVIEW] scrape error — url={effective_canonical_url!r:.100} error={str(exc)}")
         raise HTTPException(
             status_code=502,
             detail={
@@ -455,7 +524,7 @@ def preview_product(
             },
         )
     except Exception as exc:
-        logger.error(f"Unexpected error — url={validated.canonical_url} error={str(exc)}")
+        logger.error(f"[PREVIEW] unexpected error — url={effective_canonical_url!r:.100} error={str(exc)}")
         raise HTTPException(
             status_code=500,
             detail={
@@ -465,26 +534,29 @@ def preview_product(
         )
 
     # Step 3 — assemble live_data from scrape result
+    # Use effective_product_id (from resolver) when the scraper couldn't extract
+    # a product_id (e.g. passthrough short URL where browser got CAPTCHA).
     marketplace_product_id = (
-        result.marketplace_product_id or validated.marketplace_product_id
+        result.marketplace_product_id
+        or effective_product_id
+        or validated.marketplace_product_id
     )
     scraped_at = datetime.now(timezone.utc)
 
-    # ── DEBUG: log all result fields for tracing enrichment data flow ─────────
     logger.info(
-        f"[PREVIEW][debug] scrape result fields — "
+        f"[PREVIEW][debug] scrape result — "
         f"extraction_method={result.extraction_method} "
         f"current_price={result.current_price} "
         f"mrp={getattr(result, 'mrp', 'ATTR_MISSING')} "
         f"special_price={getattr(result, 'special_price', 'ATTR_MISSING')} "
         f"discount_pct={getattr(result, 'discount_pct', 'ATTR_MISSING')} "
         f"offers_count={len(getattr(result, 'offers', []) or [])} "
-        f"offers_preview={list(getattr(result, 'offers', []) or [])[:2]}"
+        f"marketplace_product_id={marketplace_product_id!r}"
     )
 
     live_data = LiveData(
         marketplace_product_id=marketplace_product_id,
-        url=validated.canonical_url,
+        url=effective_canonical_url,
         platform=validated.platform,
         name=result.name or "",
         brand=result.brand,
@@ -496,47 +568,83 @@ def preview_product(
         review_count=result.review_count,
         seller=result.seller,
         scraped_at=scraped_at,
-        # Affiliate API enrichment — present only when source=affiliate_api.
-        # None for browser-scraped results; schema defaults handle the rest.
         mrp=getattr(result, "mrp", None),
         special_price=getattr(result, "special_price", None),
         discount_pct=getattr(result, "discount_pct", None),
         offers=getattr(result, "offers", []) or [],
     )
 
-    # ── DEBUG: confirm enrichment fields made it into LiveData ────────────────
     logger.info(
         f"[PREVIEW][debug] LiveData built — "
         f"current_price={live_data.current_price} "
         f"mrp={live_data.mrp} "
         f"special_price={live_data.special_price} "
         f"discount_pct={live_data.discount_pct} "
-        f"offers_count={len(live_data.offers)} "
-        f"offers_preview={live_data.offers[:2]}"
+        f"offers_count={len(live_data.offers)}"
     )
 
-    # Step 4 — DB lookup after scrape (handles amzn.in short URL ASIN redirect)
+    # Step 3b — derive best canonical URL from scrape result (v4.9 FIX) ─────────
+    # When the resolver fell through (method=passthrough, e.g. no ScraperAPI key
+    # locally, or Firebase link that couldn't be resolved before the browser ran),
+    # effective_canonical_url is still the original short URL. By this point the
+    # scrape has succeeded and we have marketplace_product_id from the result.
+    # Build the canonical URL from the product_id so the right URL is saved to DB
+    # and used by the cron scraper — not the short URL.
+    #
+    # Amazon:   /dp/{ASIN}            — always deterministic
+    # Flipkart: /p/itm?pid={PID}      — minimal canonical with PID in query param
+    # Myntra:   can't build without slug — leave as-is (no short URLs for Myntra yet)
+    #
+    # When the resolver DID succeed (method != passthrough), effective_canonical_url
+    # is already clean — this block is a no-op in that case.
+    best_canonical_url = effective_canonical_url
+    if resolved.method == "passthrough" and marketplace_product_id:
+        if validated.platform == "amazon":
+            best_canonical_url = f"https://www.amazon.in/dp/{marketplace_product_id}"
+            logger.info(
+                f"[PREVIEW] canonical_url derived from scrape result — "
+                f"platform=amazon asin={marketplace_product_id}"
+            )
+        elif validated.platform == "flipkart":
+            best_canonical_url = (
+                f"https://www.flipkart.com/product/p/itm"
+                f"?pid={marketplace_product_id}"
+            )
+            logger.info(
+                f"[PREVIEW] canonical_url derived from scrape result — "
+                f"platform=flipkart pid={marketplace_product_id}"
+            )
+        # Myntra: no deterministic canonical without product slug — leave as-is
+
+    # Step 4 — DB lookup after scrape
+    # Handles the case where the scraper resolved a different product_id than
+    # effective_product_id (e.g. amzn.in passthrough where browser captured ASIN
+    # via page.url — result.marketplace_product_id may now differ).
     existing_after_scrape = None
-    if marketplace_product_id and marketplace_product_id != validated.marketplace_product_id:
+    if (
+        marketplace_product_id
+        and marketplace_product_id != effective_product_id
+    ):
         existing_after_scrape = product_repo.get_by_platform_and_marketplace_id(
             validated.platform, marketplace_product_id
         )
 
-    # ── Write product to DB immediately (PATH B) ──────────────────────────────
-    # Product is written/updated at preview time — no confirmation needed.
-    # confirm_subscription() will only add the subscription row.
-    scraped_now = datetime.now(timezone.utc)
-    affiliated_url = _build_affiliated_url(validated.canonical_url, validated.platform)
+    # ── Write product to DB (PATH B) ──────────────────────────────────────────
+    scraped_now    = datetime.now(timezone.utc)
+    affiliated_url = _build_affiliated_url(best_canonical_url, validated.platform)
 
-    # Re-check DB using the resolved marketplace_product_id
     db_product = existing_after_scrape or product_repo.get_by_platform_and_marketplace_id(
         validated.platform, marketplace_product_id
     )
 
     if db_product is None:
         # New product — create row
+        # v4.9: canonical_url stored alongside affiliated url.
+        # `url` = affiliated URL (for display/click-through)
+        # `canonical_url` = clean resolved URL (for scraping)
         db_product = product_repo.create(
             url=affiliated_url,
+            canonical_url=best_canonical_url,               # v4.9 — derived from scrape result when resolver fell through
             platform=validated.platform,
             marketplace_product_id=marketplace_product_id,
             name=result.name,
@@ -573,12 +681,17 @@ def preview_product(
             run_id=None,
         )
         logger.info(
-            f"[PREVIEW] PATH B — new product written to DB — "
+            f"[PREVIEW] PATH B — new product written — "
             f"product_id={db_product.product_id} "
-            f"platform={validated.platform}"
+            f"platform={validated.platform} "
+            f"canonical_url={best_canonical_url!r:.100}"
         )
     else:
         # Existing product — update metadata + affiliate fields
+        # v4.9: also update canonical_url if not yet set
+        if best_canonical_url and not db_product.canonical_url:
+            product_repo.update_canonical_url(db_product, best_canonical_url)
+
         product_repo.update_from_live_data(
             db_product,
             {
@@ -614,9 +727,56 @@ def preview_product(
         if incoming_category:
             product_repo.update_category(db_product, incoming_category)
         logger.info(
-            f"[PREVIEW] PATH B — existing product updated in DB — "
+            f"[PREVIEW] PATH B — existing product updated — "
             f"product_id={db_product.product_id}"
         )
+
+    # ── Step 4b — Product Identity Graph (v5.0) ──────────────────────────────
+    # After db_product is written/found, link it to a canonical product.
+    # Runs inside the same transaction — committed together below.
+    # Silently skips on any error (identity matching is non-critical).
+    if db_product is not None:
+        try:
+            specs = (getattr(result, "product_metadata", None) or {}).get("specs", {})
+            canonical = product_identity_service.find_or_create_canonical(
+                db=db,
+                platform=validated.platform,
+                name=result.name,
+                brand=result.brand,
+                category=getattr(result, "category", None) or "other",
+                image_url=result.image_url,
+                specs=specs,
+            )
+            if canonical:
+                product_repo.update_canonical_id(db_product, canonical.canonical_id)
+                # Store model_number and normalized_name on the listing too.
+                # v5.0 fix: when specs=0 (Amazon browser scrape), extract_model_number
+                # returns None even though find_or_create_canonical matched via name-based
+                # extraction and stored the value on the canonical row. Fall back to
+                # canonical.model_number so the listing row is also populated.
+                model_number = product_identity_service.extract_model_number(specs)
+                if model_number is None:
+                    model_number = canonical.model_number  # backfill from canonical
+                normalized   = product_identity_service.normalize_name(
+                    result.name or "", result.brand or "", specs
+                )
+                if model_number:
+                    product_repo.update_model_number(db_product, model_number)
+                if normalized:
+                    product_repo.update_normalized_name(db_product, normalized)
+                logger.info(
+                    f"[PREVIEW] identity linked — "
+                    f"product_id={db_product.product_id} "
+                    f"canonical_id={canonical.canonical_id} "
+                    f"model_number={model_number!r} "
+                    f"normalized={normalized!r:.60}"
+                )
+        except Exception as exc:
+            logger.warning(
+                f"[PREVIEW] identity service failed (non-critical) — "
+                f"product_id={db_product.product_id} "
+                f"error={type(exc).__name__}: {exc}"
+            )
 
     try:
         db.commit()

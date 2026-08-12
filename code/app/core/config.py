@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     flipkart_affiliate_token: str = ""
     secret_key: str = "pricemonitor"
     use_scraper_v2: bool = True
+    tavily_api_key: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

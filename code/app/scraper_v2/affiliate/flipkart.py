@@ -52,11 +52,18 @@ logger = logging.getLogger(__name__)
 
 _API_BASE = "https://affiliate-api.flipkart.net/affiliate"
 _PRODUCT_ENDPOINT = "/1.0/product.json"
+_SEARCH_ENDPOINT  = "/1.0/search.json"           # v5.2 — search by name
 
 # Matches /p/itm{alphanumeric} in the URL path.
 _PID_FROM_PATH = re.compile(r"/p/(itm[a-zA-Z0-9]+)", re.IGNORECASE)
 
 _REQUEST_TIMEOUT_S: int = 10
+
+
+# ── Search result re-ranking ─────────────────────────────────────────────── #
+# Scoring logic lives in app/utils/search_scorer.py — shared with Tavily client
+# so all platforms use identical ranking signals.
+from app.utils.search_scorer import score_candidate as _score_candidate, rank_candidates
 
 
 class FlipkartAffiliateClient(BaseAffiliateClient):
@@ -144,10 +151,20 @@ class FlipkartAffiliateClient(BaseAffiliateClient):
         )
 
         try:
+            import urllib.parse as _up
+            # Flipkart API requires %20 for spaces — requests uses + by default.
+            # Build query string manually with quote() instead of urlencode().
+            query_string = '&'.join(
+                f"{k}={_up.quote(str(v), safe='')}"
+                for k, v in params.items()
+            )
+            full_url = f"{endpoint}?{query_string}"
+            logger.info(
+                f"[AFFILIATE][flipkart] request URL={full_url!r:.150}"
+            )
             resp = requests.get(
-                endpoint,
+                full_url,
                 headers=self._headers,
-                params=params,
                 timeout=_REQUEST_TIMEOUT_S,
             )
         except requests.Timeout:
@@ -190,6 +207,206 @@ class FlipkartAffiliateClient(BaseAffiliateClient):
             )
 
         return self._parse(product_id, data)
+
+    def search_by_name(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> list[dict]:
+        """
+        Search Flipkart Affiliate API by product name. (v5.2)
+
+        Used by POST /v1/products/search-by-name when the user selects Flipkart
+        and the URL scrape failed. Returns structured product candidates without
+        requiring a URL — the user picks one and the existing subscribe flow handles
+        the rest.
+
+        API: GET /affiliate/1.0/search.json?query={query}&resultCount=20
+
+        Args:
+            query: Product name typed by user (e.g. "Samsung Galaxy S24").
+            limit: Max results to return (1–10). Default 5.
+
+        Returns:
+            List of candidate dicts with keys:
+                product_id, name, current_price, mrp, image_url,
+                url, availability, brand, category
+            Empty list when no results or any error.
+
+        Never raises — caller treats empty list as "no results found".
+        """
+        if not query or not query.strip():
+            return []
+
+        # Ensure credentials are loaded
+        if not self._headers:
+            try:
+                self._authenticate()
+            except Exception as exc:
+                logger.warning(
+                    f"[AFFILIATE][flipkart] search_by_name auth failed — "
+                    f"error={exc}"
+                )
+                return []
+
+        endpoint = f"{_API_BASE}{_SEARCH_ENDPOINT}"
+        # Clean query — Flipkart Affiliate API returns HTTP 400 for special
+        # characters like brackets, slashes, pipes. Strip them and collapse spaces.
+        # e.g. "Zebronics (2800 lm / 2 Speaker)" → "Zebronics 2800 lm 2 Speaker"
+        clean_query = re.sub(r'[^\w\s]', ' ', query).strip()
+        clean_query = re.sub(r'\s+', ' ', clean_query)
+        # Flipkart API rejects queries longer than ~80 chars with HTTP 400.
+        # Truncate to first 8 words — covers brand + model + key descriptors.
+        # Re-ranking handles relevance from these 8 words.
+        # e.g. "ZEBRONICS Zeb Pixa Play 30 2800 lm 2 Speaker Wireless..." (160 chars)
+        #   →  "ZEBRONICS Zeb Pixa Play 30 2800 lm 2"  (8 words, ~38 chars)
+        clean_query = ' '.join(clean_query.split()[:8])
+
+        params = {
+            "query":       clean_query,
+            "resultCount": 10,   # fetch 10 — Flipkart API max is 10
+        }
+
+        logger.info(
+            f"[AFFILIATE][flipkart] search_by_name — "
+            f"query={query!r:.60} limit={limit}"
+        )
+        logger.info(
+            f"[AFFILIATE][flipkart] clean_query={clean_query!r:.60}"
+        )
+
+        try:
+            import urllib.parse as _up
+            # Flipkart API requires %20 for spaces — requests uses + by default.
+            # Build query string manually with quote() instead of urlencode().
+            query_string = '&'.join(
+                f"{k}={_up.quote(str(v), safe='')}"
+                for k, v in params.items()
+            )
+            full_url = f"{endpoint}?{query_string}"
+            logger.info(
+                f"[AFFILIATE][flipkart] request URL={full_url!r:.150}"
+            )
+            resp = requests.get(
+                full_url,
+                headers=self._headers,
+                timeout=_REQUEST_TIMEOUT_S,
+            )
+        except requests.Timeout:
+            logger.warning(
+                f"[AFFILIATE][flipkart] search_by_name timeout — "
+                f"query={query!r:.50}"
+            )
+            return []
+        except requests.RequestException as exc:
+            logger.warning(
+                f"[AFFILIATE][flipkart] search_by_name network error — "
+                f"error={exc}"
+            )
+            return []
+
+        if resp.status_code != 200:
+            logger.warning(
+                f"[AFFILIATE][flipkart] search_by_name HTTP {resp.status_code} — "
+                f"query={query!r:.50} response={resp.text[:200]!r}"
+            )
+            return []
+
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            logger.warning(
+                f"[AFFILIATE][flipkart] search_by_name JSON error — {exc}"
+            )
+            return []
+
+        # Response shape: { "products": [ { "productBaseInfoV1": {...}, ... }, ... ] }
+        raw_products = data.get("products") or data.get("productInfoList") or []
+        candidates = []
+
+        # Parse all returned results (up to 20) — re-rank after, then trim to limit
+        for item in raw_products[:20]:
+            try:
+                base = (
+                    item.get("productBaseInfoV1")
+                    or item.get("productBaseInfo")
+                    or {}
+                )
+                attrs = base.get("productAttributes") or base
+
+                # Price
+                def _amt(field: str) -> Optional[Decimal]:
+                    block = attrs.get(field) or base.get(field)
+                    if not block:
+                        return None
+                    raw = block.get("amount")
+                    if raw is None:
+                        return None
+                    try:
+                        v = Decimal(str(raw))
+                        return v if v > 0 else None
+                    except InvalidOperation:
+                        return None
+
+                price = _amt("flipkartSellingPrice") or _amt("sellingPrice")
+                if price is None:
+                    continue  # skip — no price means we can't display it
+
+                image_urls = attrs.get("imageUrls") or {}
+                image_url = (
+                    image_urls.get("400x400")
+                    or image_urls.get("200x200")
+                    or image_urls.get("unknown")
+                )
+
+                product_id = (
+                    attrs.get("productId")
+                    or base.get("productId")
+                    or ""
+                )
+                title = attrs.get("title") or base.get("title") or ""
+
+                # Build affiliate URL from product_id
+                affiliated_url = (
+                    f"https://www.flipkart.com/product/p/itm"
+                    f"?pid={product_id}"
+                    f"&affid={getattr(settings, 'flipkart_affiliate_id', '')}"
+                ) if product_id else ""
+
+                candidates.append({
+                    "product_id":    product_id,
+                    "name":          title,
+                    "current_price": float(price),
+                    "mrp":           float(_amt("maximumRetailPrice")) if _amt("maximumRetailPrice") else None,
+                    "image_url":     image_url,
+                    "url":           affiliated_url,
+                    "availability":  bool(attrs.get("inStock", True)),
+                    "brand":         attrs.get("productBrand") or base.get("productBrand"),
+                    "platform":      "flipkart",
+                })
+            except Exception as exc:
+                logger.warning(
+                    f"[AFFILIATE][flipkart] search_by_name parse error — "
+                    f"error={exc}"
+                )
+                continue
+
+        # ── Re-rank by query match score, return top `limit` ────────────────
+        # rank_candidates() scores, sorts, strips _score, and trims to limit.
+        # Shared with Tavily client — identical signals across all platforms.
+        if candidates:
+            candidates = rank_candidates(candidates, query, limit)
+            for c in candidates[:3]:
+                logger.info(
+                    f"[AFFILIATE][flipkart] ranked — "
+                    f"name={c['name'][:60]!r}"
+                )
+
+        logger.info(
+            f"[AFFILIATE][flipkart] search_by_name found {len(candidates)} candidates — "
+            f"query={query!r:.50}"
+        )
+        return candidates
 
     # ── Internal helpers ───────────────────────────────────────────────────── #
 

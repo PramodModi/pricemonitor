@@ -51,7 +51,9 @@ logger = get_logger(__name__)
 VALID_CATEGORIES: frozenset[str] = frozenset({
     "mobiles",
     "electronics",
+    "appliances",   # kitchen & home appliances — separate from electronics
     "fashion",
+    "footwear",     # shoes, sandals, boots — separate from fashion
     "home",
     "beauty",
     "sports",
@@ -92,18 +94,41 @@ _RULES: list[tuple[str, str]] = [
     ("audio",           "electronics"),
     ("home theatre",    "electronics"),
     ("home theater",    "electronics"),
-    ("refrigerator",    "electronics"),
-    ("washing machine", "electronics"),
-    ("air conditioner", "electronics"),
-    ("microwave",       "electronics"),
-    ("geyser",          "electronics"),
-    ("appliance",       "electronics"),
     ("electronic",      "electronics"),
     ("gaming",          "electronics"),
     ("console",         "electronics"),
     ("power bank",      "electronics"),
     ("charger",         "electronics"),
     ("cable",           "electronics"),
+
+    # ── Appliances ────────────────────────────────────────────────────────────
+    # Kitchen and home appliances — intentionally separate from electronics.
+    # Rule: if it has a motor or heating element and lives in the kitchen/home,
+    # it is an appliance. Pure consumer electronics (TV, laptop) stay above.
+    ("washing machine", "appliances"),
+    ("refrigerator",    "appliances"),
+    ("fridge",          "appliances"),
+    ("air conditioner", "appliances"),
+    ("microwave",       "appliances"),
+    ("dishwasher",      "appliances"),
+    ("mixer",           "appliances"),
+    ("grinder",         "appliances"),
+    ("blender",         "appliances"),
+    ("juicer",          "appliances"),
+    ("geyser",          "appliances"),
+    ("water heater",    "appliances"),
+    ("water purifier",  "appliances"),
+    ("air purifier",    "appliances"),
+    ("cooler",          "appliances"),
+    ("fan",             "appliances"),
+    ("iron",            "appliances"),
+    ("vacuum",          "appliances"),
+    ("appliance",       "appliances"),
+    ("induction",       "appliances"),
+    ("oven",            "appliances"),
+    ("toaster",         "appliances"),
+    ("kettle",          "appliances"),
+    ("coffee maker",    "appliances"),
 
     # ── Fashion ───────────────────────────────────────────────────────────────
     ("men",             "fashion"),
@@ -120,10 +145,6 @@ _RULES: list[tuple[str, str]] = [
     ("kurta",           "fashion"),
     ("saree",           "fashion"),
     ("lehenga",         "fashion"),
-    ("footwear",        "fashion"),
-    ("shoes",           "fashion"),
-    ("sandal",          "fashion"),
-    ("sneaker",         "fashion"),
     ("bag",             "fashion"),
     ("handbag",         "fashion"),
     ("wallet",          "fashion"),
@@ -134,6 +155,21 @@ _RULES: list[tuple[str, str]] = [
     ("accessories",     "fashion"),
     ("sunglasses",      "fashion"),
     ("luggage",         "fashion"),
+
+    # ── Footwear ──────────────────────────────────────────────────────────────
+    # Intentionally separate from fashion — canonical_products uses footwear slug.
+    ("footwear",        "footwear"),
+    ("shoes",           "footwear"),
+    ("shoe",            "footwear"),
+    ("sandal",          "footwear"),
+    ("sneaker",         "footwear"),
+    ("boot",            "footwear"),
+    ("chappal",         "footwear"),
+    ("slipper",         "footwear"),
+    ("heel",            "footwear"),
+    ("loafer",          "footwear"),
+    ("moccasin",        "footwear"),
+    ("flip flop",       "footwear"),
 
     # ── Home & Kitchen ────────────────────────────────────────────────────────
     ("home",            "home"),

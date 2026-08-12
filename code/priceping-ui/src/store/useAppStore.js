@@ -20,12 +20,14 @@ export const useAppStore = create(
 
       // ─── Session-only ────────────────────────────────────────────────────
       // Track page state machine
-      trackStep: 'input',          // "input" | "loading" | "preview" | "confirming" | "success"
+      trackStep: 'input',          // "input" | "loading" | "searching" | "search_results" | "scrape_failed" | "preview" | "confirming" | "success"
       previewResult: null,         // full POST /v1/products/preview response
+      scrapedUrl: null,            // URL that failed to scrape — passed to ScrapeFailureCard
 
       setTrackStep: (step) => set({ trackStep: step }),
       setPreviewResult: (result) => set({ previewResult: result }),
-      resetTrack: () => set({ trackStep: 'input', previewResult: null }),
+      setScrapedUrl: (url) => set({ scrapedUrl: url }),
+      resetTrack: () => set({ trackStep: 'input', previewResult: null, scrapedUrl: null }),
 
       // Delete confirmation dialog
       deleteTarget: null,          // { subscriptionId, productName } | null

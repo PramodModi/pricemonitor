@@ -36,10 +36,29 @@ class ProductRepository:
         )
 
     def create(self, **fields) -> Product:
+        """
+        Insert a new product row. Handles concurrent duplicate inserts gracefully:
+        if two requests race to insert the same platform+marketplace_product_id,
+        the IntegrityError is caught, the session rolled back to a clean state,
+        and the existing row is returned instead.
+        This replaces the 500 that previously occurred on rapid double-submits.
+        """
+        from sqlalchemy.exc import IntegrityError
         product = Product(**fields)
         self.db.add(product)
-        self.db.flush()
-        return product
+        try:
+            self.db.flush()
+            return product
+        except IntegrityError:
+            self.db.rollback()
+            # Concurrent request already inserted this product — fetch and return it
+            existing = self.get_by_platform_and_marketplace_id(
+                fields["platform"],
+                fields["marketplace_product_id"],
+            )
+            if existing:
+                return existing
+            raise  # unexpected — re-raise if fetch also fails
 
     def update_from_live_data(
         self,
@@ -69,6 +88,59 @@ class ProductRepository:
         """Overwrite the stored URL — used to backfill affiliate tags."""
         product.url = new_url
         self.db.flush()
+        return product
+
+    def update_canonical_url(
+        self,
+        product: Product,
+        canonical_url: str,
+    ) -> Product:
+        """
+        Persist the resolved canonical URL for this product. (v4.9)
+        Only writes when canonical_url is non-empty and differs from current value.
+        """
+        if canonical_url and canonical_url != product.canonical_url:
+            product.canonical_url = canonical_url
+            self.db.flush()
+        return product
+
+    def update_canonical_id(
+        self,
+        product: Product,
+        canonical_id: uuid.UUID,
+    ) -> Product:
+        """
+        Link this portal listing to a canonical product. (v5.0)
+        Called by ProductIdentityService after find_or_create_canonical().
+        """
+        if canonical_id and canonical_id != product.canonical_id:
+            product.canonical_id = canonical_id
+            self.db.flush()
+        return product
+
+    def update_model_number(
+        self,
+        product: Product,
+        model_number: Optional[str],
+    ) -> Product:
+        """
+        Store the extracted model number on the portal listing. (v5.0)
+        Used for fast cross-portal lookup without joining canonical_products.
+        """
+        if model_number and model_number != product.model_number:
+            product.model_number = model_number
+            self.db.flush()
+        return product
+
+    def update_normalized_name(
+        self,
+        product: Product,
+        normalized_name: Optional[str],
+    ) -> Product:
+        """Store the normalized product name (specs stripped). (v5.0)"""
+        if normalized_name and normalized_name != product.normalized_name:
+            product.normalized_name = normalized_name
+            self.db.flush()
         return product
 
     def update_affiliate_data(
