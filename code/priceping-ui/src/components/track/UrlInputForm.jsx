@@ -116,16 +116,17 @@ export default function UrlInputForm({
   isLoading = false,
   isSearching = false,
   initialUrl = '',
+  initialQuery = '',
 }) {
-  const [value, setValue] = useState(initialUrl)
+  const [value, setValue] = useState(initialUrl || initialQuery)
   const [error, setError] = useState('')
   const [selectedPlatform, setSelectedPlatform] = useState('all')
 
   const isBusy = isLoading || isSearching
 
-  // Auto-trigger if initialUrl is provided (from landing page hero)
+  // Auto-trigger on mount when pre-filled from landing page (?url= or ?q=)
   useEffect(() => {
-    if (initialUrl) {
+    if (initialUrl || initialQuery) {
       handleSubmit(new Event('submit'))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowRight } from 'lucide-react'
-import { isSupportedPlatformUrl } from '@/lib/utils'
+import { ArrowRight, Search } from 'lucide-react'
 
 /**
  * Extracts the first http/https URL from a string.
@@ -21,39 +20,39 @@ function extractUrl(text) {
  * HeroSection — the signature element of the landing page.
  * The URL input box IS the hero. No carousel, no banner.
  *
- * Submitting navigates to /track?url={encodedUrl}
- * The Track page reads ?url= and pre-fills + auto-triggers the scrape.
+ * Submitting navigates to /track?url={encodedUrl} for URLs
+ * or /track?q={encodedQuery} for product names.
+ * The Track page reads the param, pre-fills the input and auto-triggers.
  */
 export default function HeroSection() {
   const router = useRouter()
-  const [url, setUrl]   = useState('')
+  const [input, setInput] = useState('')
   const [error, setError] = useState('')
 
   const handleSubmit = (e) => {
     e.preventDefault()
+    const raw = input.trim()
 
-    // Extract the first URL from the input — handles Myntra share text where
-    // the product name appears before the URL on the same (or next) line.
-    const trimmed = extractUrl(url.trim())
-
-    if (!trimmed) {
-      setError('Paste a product URL to get started.')
-      return
-    }
-
-    try { new URL(trimmed) }
-    catch {
-      setError("That doesn't look like a valid URL.")
-      return
-    }
-
-    if (!isSupportedPlatformUrl(trimmed)) {
-      setError('Only Amazon India, Flipkart, and Myntra URLs are supported.')
+    if (!raw) {
+      setError('Paste a product URL or type a product name to get started.')
       return
     }
 
     setError('')
-    router.push(`/track?url=${encodeURIComponent(trimmed)}`)
+
+    // URL path — extract URL from multiline paste, navigate with ?url=
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      const trimmed = extractUrl(raw)
+      router.push(`/track?url=${encodeURIComponent(trimmed)}`)
+      return
+    }
+
+    // Name path — navigate with ?q= for name search
+    if (raw.length < 2) {
+      setError('Please enter at least 2 characters.')
+      return
+    }
+    router.push(`/track?q=${encodeURIComponent(raw)}`)
   }
 
   return (
@@ -76,8 +75,8 @@ export default function HeroSection() {
 
           {/* Subheadline */}
           <p className="mt-5 text-lg text-slate-500 text-balance leading-relaxed">
-            Paste any product URL from Amazon, Flipkart, or Myntra. We monitor the price
-            and ping you the moment it drops — no app, no account required.
+            Paste a product URL or type a product name from Amazon, Flipkart, or Myntra.
+            We monitor the price and ping you the moment it drops — no app, no account required.
           </p>
 
           {/* ── The signature input box ─────────────────────────── */}
@@ -88,20 +87,20 @@ export default function HeroSection() {
           >
             <div className="flex-1 relative">
               <input
-                type="url"
-                value={url}
+                type="text"
+                value={input}
                 onChange={(e) => {
                   const val = e.target.value
-                  // If the pasted text contains a URL preceded by other text
+                  // If multiline paste contains a URL preceded by text
                   // (e.g. Myntra share: "Product Name https://..."),
-                  // extract the URL immediately so the input shows the clean URL.
+                  // extract the URL so the input shows the clean URL.
                   const cleaned = (!val.startsWith('http') && /https?:\/\//.test(val))
                     ? extractUrl(val)
                     : val
-                  setUrl(cleaned)
+                  setInput(cleaned)
                   setError('')
                 }}
-                placeholder="Paste Amazon, Flipkart, or Myntra URL…"
+                placeholder="Paste a URL or type a product name…"
                 className="hero-input w-full"
                 autoComplete="off"
                 spellCheck={false}
@@ -111,8 +110,10 @@ export default function HeroSection() {
               type="submit"
               className="btn-accent shrink-0 px-8 py-4 text-base font-bold"
             >
-              Track price
-              <ArrowRight size={18} />
+              {(input.startsWith('http://') || input.startsWith('https://'))
+                ? <><span>Track price</span><ArrowRight size={18} /></>
+                : <><Search size={18} /><span>Search</span></>
+              }
             </button>
           </form>
 

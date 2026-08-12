@@ -101,8 +101,9 @@ export default function TrackPageClient() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // FIX 1: Read ?url= param once on mount into local state
+  // Read ?url= and ?q= params once on mount into local state
   const [initialUrl, setInitialUrl] = useState(searchParams.get('url') ?? '')
+  const [initialQuery] = useState(searchParams.get('q') ?? '')
 
   const { mutate: fetchPreview, error: previewError }                    = usePreview()
   const { mutate: subscribe,    isPending: isConfirming, error: subscribeError } = useSubscribe()
@@ -208,6 +209,7 @@ export default function TrackPageClient() {
           isLoading={false}
           isSearching={isSearching}
           initialUrl={initialUrl}
+          initialQuery={initialQuery}
         />
       </div>
     )
