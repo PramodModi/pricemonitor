@@ -7,6 +7,11 @@ import { formatPrice, formatTimeAgo, getPlatformLabel } from '@/lib/utils'
 import { Package, Loader2 } from 'lucide-react'
 import api from '@/lib/api'
 
+// UUID v4 format check — Flipkart PIDs (e.g. "WMNGPYWTEFA3VFHF") are not UUIDs
+const isDbUuid = (id) => 
+  typeof id === 'string' && 
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+
 const LIVE_PLATFORMS = [
   { value: 'amazon',   label: '🛒 Amazon India' },
   { value: 'flipkart', label: '🛍️ Flipkart' },
@@ -78,7 +83,9 @@ function ListingCard({ listing, product, onSelectUrl }) {
   }
 
   const handleMonitorClick = () => {
-    if (listing._is_tavily) {
+    // Route to preview flow when: Tavily result, no product_id, or non-UUID product_id
+    // Flipkart affiliate PIDs (e.g. "WMNGPYWTEFA3VFHF") are not DB UUIDs
+    if (listing._is_tavily || !isDbUuid(listing.product_id)) {
       onSelectUrl?.(listing.url)
       return
     }
@@ -175,7 +182,7 @@ function ListingCard({ listing, product, onSelectUrl }) {
             ? '✅ Monitoring'
             : isSubscribing
             ? 'Adding…'
-            : listing._is_tavily
+            : (listing._is_tavily || !isDbUuid(listing.product_id))
             ? '🔍 Get live details'
             : '🔔 Monitor this'}
         </button>
