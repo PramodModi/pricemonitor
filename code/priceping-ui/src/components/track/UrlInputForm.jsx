@@ -50,7 +50,7 @@ function validateProductUrl(url) {
 
     // ── Amazon India ──────────────────────────────────────────────────────────
     if (hostname.includes('amazon.in')) {
-      const asinMatch = parsed.pathname.match(/\/dp\/([A-Z0-9]{10})/i)
+      const asinMatch = parsed.pathname.match(/\/(dp|gp\/product)\/([A-Z0-9]{10})/i)
       if (!asinMatch) {
         return "That doesn't look like a product page. Copy the URL from the product's page directly."
       }
