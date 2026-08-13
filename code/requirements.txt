@@ -13,3 +13,5 @@ email-validator
 requests
 pyyaml
 tavily-python
+beautifulsoup4==4.15.0
+lxml==6.1.1

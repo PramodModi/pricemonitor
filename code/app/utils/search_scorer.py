@@ -46,6 +46,58 @@ _STOPWORDS: frozenset[str] = frozenset({
 })
 
 
+def query_title_similarity(query: str, title: str) -> float:
+    """
+    Token overlap similarity between a search query and a result title.
+    Returns 0.0–1.0.
+
+    Used to validate search results — if top result similarity is below
+    a threshold, the results are likely wrong category/product.
+
+    Strips common prefixes like "Buy " from portal titles before scoring.
+    Ignores stopwords and short tokens (< 2 chars).
+
+    Args:
+        query: Raw user search query (e.g. "Boat Wanderer Smart Kids Watch").
+        title: Result title (e.g. "Buy boAt Wanderer Smart Kids Watch GPS").
+
+    Returns:
+        Float 0.0–1.0. Higher = better match.
+        0.0 when either string is empty.
+
+    Examples:
+        >>> query_title_similarity("Boat Wanderer Smart", "Buy boAt Wanderer Smart Kids Watch")
+        0.6
+        >>> query_title_similarity("Samsung TV", "boAt Speaker 200")
+        0.0
+    """
+    if not query or not title:
+        return 0.0
+
+    _STOPWORDS = frozenset({
+        "the", "and", "for", "with", "from", "this", "that",
+        "buy", "a", "an", "in", "of", "to", "is", "are", "at",
+        "by", "on", "it", "be", "as", "or", "get",
+    })
+
+    def _tokenize(text: str) -> set:
+        import re
+        tokens = re.split(r"[\s,()\[\]|&]+", text.lower().strip())
+        return {t for t in tokens if len(t) >= 2 and t not in _STOPWORDS}
+
+    # Strip common portal prefixes
+    clean_title = title.lower().replace("buy ", "").strip()
+
+    q_tokens = _tokenize(query)
+    t_tokens = _tokenize(clean_title)
+
+    if not q_tokens or not t_tokens:
+        return 0.0
+
+    intersection = q_tokens & t_tokens
+    return round(len(intersection) / max(len(q_tokens), len(t_tokens)), 4)
+
+
 def score_candidate(candidate: dict, query: str) -> float:
     """
     Score a product search candidate against the user's query.

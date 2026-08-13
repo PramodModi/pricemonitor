@@ -61,7 +61,14 @@ def _is_product_url(url: str, platform: str) -> bool:
             re.search(r"/[^/]+-[^/]+/p/", url) is not None  # slug/p/ pattern
         )
     if platform == "myntra":
-        return bool(re.search(r"/\d+/buy", url) or re.search(r"-\d+$", url.rstrip("/")))
+        # Accept product pages (/123456/buy) and category listing pages
+        # Reject only the homepage and fashion-store landing pages
+        parsed_path = url.split("?")[0].rstrip("/")
+        if parsed_path in ("https://www.myntra.com", "https://myntra.com"):
+            return False
+        if "myntra-fashion-store" in url:
+            return False
+        return True
     return True
 
 
@@ -195,7 +202,7 @@ def search_by_name(body: SearchByNameRequest) -> SearchByNameResponse:
                         name=r.title,
                         current_price=None,
                         mrp=None,
-                        image_url=None,
+                        image_url=r.image_url or None,
                         url=r.url,
                         availability=None,
                         brand=None,
@@ -217,13 +224,20 @@ def search_by_name(body: SearchByNameRequest) -> SearchByNameResponse:
                 platform=platform,
                 limit=limit + 3,   # fetch extra to account for filtered URLs
             )
+            # Debug: log each result URL and filter outcome
+            for r in results:
+                passes = r.url and _is_product_url(r.url, platform)
+                logger.info(
+                    f"[SEARCH_BY_NAME] {platform} filter={'PASS' if passes else 'FAIL'} "
+                    f"url={r.url!r:.80}"
+                )
             candidates = [
                 ProductCandidate(
                     product_id=None,
                     name=r.title,
                     current_price=None,
                     mrp=None,
-                    image_url=_amazon_image_url(r.url) if platform == "amazon" else None,
+                    image_url=r.image_url,
                     url=r.url,
                     availability=None,
                     brand=None,

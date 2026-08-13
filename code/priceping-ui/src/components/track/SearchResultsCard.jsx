@@ -7,6 +7,13 @@ import { formatPrice, formatTimeAgo, getPlatformLabel } from '@/lib/utils'
 import { Package, Loader2 } from 'lucide-react'
 import api from '@/lib/api'
 
+// Platform placeholder images when no product image available
+const PLATFORM_PLACEHOLDERS = {
+  amazon:   '/logos/amazon.svg',
+  flipkart: '/logos/flipkart.svg',
+  myntra:   '/logos/myntra.png',
+}
+
 // UUID v4 format check — Flipkart PIDs (e.g. "WMNGPYWTEFA3VFHF") are not UUIDs
 const isDbUuid = (id) => 
   typeof id === 'string' && 
@@ -113,14 +120,23 @@ function ListingCard({ listing, product, onSelectUrl }) {
         <PlatformBadge platform={listing.platform} />
       </div>
 
-      {/* Product image */}
+      {/* Product image — falls back to platform logo */}
       <div className="w-full aspect-square rounded-lg border border-slate-100 bg-slate-50 overflow-hidden flex items-center justify-center mb-3">
         {product.image_url ? (
           <img
             src={product.image_url}
             alt={product.name ?? 'Product'}
             className="w-full h-full object-contain p-2"
-            onError={(e) => { e.target.style.display = 'none' }}
+            onError={(e) => {
+              e.target.src = PLATFORM_PLACEHOLDERS[listing.platform] ?? ''
+              e.target.className = 'w-1/2 h-1/2 object-contain opacity-40'
+            }}
+          />
+        ) : PLATFORM_PLACEHOLDERS[listing.platform] ? (
+          <img
+            src={PLATFORM_PLACEHOLDERS[listing.platform]}
+            alt={listing.platform}
+            className="w-1/2 h-1/2 object-contain opacity-40"
           />
         ) : (
           <Package size={32} className="text-slate-300" />

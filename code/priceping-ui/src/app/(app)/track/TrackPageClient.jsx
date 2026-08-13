@@ -9,6 +9,7 @@ import { usePreview } from '@/hooks/usePreview'
 import { useSubscribe } from '@/hooks/useSubscribe'
 import { useSearch } from '@/hooks/useSearch'
 import UrlInputForm from '@/components/track/UrlInputForm'
+import { queryTitleSimilarity } from '@/lib/searchUtils'
 import PreviewCard from '@/components/track/PreviewCard'
 import SuccessScreen from '@/components/track/SuccessScreen'
 import SearchResultsCard from '@/components/track/SearchResultsCard'
@@ -145,10 +146,19 @@ export default function TrackPageClient() {
                     .filter((r) => r.listings.length > 0)
                 }
 
-                if (dbResults.length > 0) {
+                // Check if top DB result is similar enough to the query
+                // If similarity < 0.6, DB results are likely wrong category/product
+                const topResult = dbResults[0]
+                const topTitle = topResult?.normalized_name || topResult?.name || ''
+                const sim = queryTitleSimilarity(q, topTitle)
+
+                if (dbResults.length > 0 && sim >= 0.6) {
                   setSearchResults(dbResults)
                   setTrackStep('search_results')
                 } else {
+                  if (dbResults.length > 0) {
+                    console.log(`[SEARCH] DB top result sim=${sim.toFixed(2)} < 0.6 — skipping DB, falling back to live search`)
+                  }
                   // DB returned nothing (or filtered to nothing) — fall back to Tavily
                   try {
                     const apiModule = await import('@/lib/api')
