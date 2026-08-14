@@ -23,11 +23,13 @@ import { useItems } from '@/hooks/useItems'
  * Props:
  *   previewResult — full response from POST /v1/products/preview
  *   onConfirm(email) — called when user confirms
- *   onBack()         — called when user clicks "Different URL"
+ *   onBack()           — called when user clicks "Different product or URL" (goes to input)
+ *   onBackToResults() — optional, called when user clicks "Back to search results"
+ *                       only passed when preview was reached via search flow
  *   isConfirming     — shows spinner on confirm button
  *   error            — error message string (if confirm failed)
  */
-export default function PreviewCard({ previewResult, onConfirm, onBack, isConfirming, error }) {
+export default function PreviewCard({ previewResult, onConfirm, onBack, onBackToResults, isConfirming, error }) {
   const storedEmail = useAppStore((state) => state.userEmail)
   const [email, setEmail] = useState(storedEmail ?? '')
   const [emailError, setEmailError] = useState('')
@@ -221,6 +223,16 @@ export default function PreviewCard({ previewResult, onConfirm, onBack, isConfir
       )}
 
       {/* Actions */}
+      {onBackToResults && (
+        <button
+          onClick={onBackToResults}
+          disabled={isConfirming}
+          className="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 font-medium -mt-1"
+        >
+          <ArrowLeft size={14} />
+          Back to search results
+        </button>
+      )}
       <div className="flex flex-col-reverse gap-3 sm:flex-row">
         <button
           onClick={onBack}
@@ -228,7 +240,7 @@ export default function PreviewCard({ previewResult, onConfirm, onBack, isConfir
           className="btn-ghost justify-center"
         >
           <ArrowLeft size={15} />
-          Different URL
+          Different product or URL
         </button>
 
         {isAlreadyTracking ? (

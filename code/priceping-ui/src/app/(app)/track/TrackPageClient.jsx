@@ -83,28 +83,39 @@ function LoadingBeacon() {
 export default function TrackPageClient() {
   const searchParams = useSearchParams()
 
-  const trackStep     = useAppStore((s) => s.trackStep)
-  const previewResult = useAppStore((s) => s.previewResult)
-  const userEmail     = useAppStore((s) => s.userEmail)
-  const setTrackStep  = useAppStore((s) => s.setTrackStep)
-  const resetTrack    = useAppStore((s) => s.resetTrack)
-
-  // Search state — local (not in Zustand — doesn't need to survive navigation)
-  const [searchQuery, setSearchQuery]   = useState('')
-  const [searchResults, setSearchResults] = useState([])
+  const trackStep        = useAppStore((s) => s.trackStep)
+  const previewResult    = useAppStore((s) => s.previewResult)
+  const userEmail        = useAppStore((s) => s.userEmail)
+  const setTrackStep     = useAppStore((s) => s.setTrackStep)
+  const resetTrack       = useAppStore((s) => s.resetTrack)
+  // Search state in Zustand so it survives navigation to/from product pages
+  const searchQuery      = useAppStore((s) => s.searchQuery ?? '')
+  const searchResults    = useAppStore((s) => s.searchResults ?? [])
+  const setSearchQuery   = useAppStore((s) => s.setSearchQuery)
+  const setSearchResults = useAppStore((s) => s.setSearchResults)
 
   // Prefetch items on mount so isTracking cache is warm in ListingRow
   useItems(userEmail)
 
-  // FIX 2: Reset state machine every time this page mounts
+  // On fresh mount with no active flow, ensure clean state.
+  // When user navigates back from a product page, trackStep is preserved in
+  // Zustand (e.g. 'search_results') so this condition is false — no reset.
   useEffect(() => {
-    resetTrack()
+    const step = useAppStore.getState().trackStep
+    const results = useAppStore.getState().searchResults ?? []
+    if (step === 'input' && results.length === 0) {
+      resetTrack()
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Read ?url= and ?q= params once on mount into local state
   const [initialUrl, setInitialUrl] = useState(searchParams.get('url') ?? '')
-  const [initialQuery] = useState(searchParams.get('q') ?? '')
+  const [initialQuery, setInitialQuery] = useState(searchParams.get('q') ?? '')
+
+  // Track how the user arrived at preview — 'url' (direct URL entry) or 'search' (via search results)
+  // so Back from PreviewCard knows whether to return to input or search_results
+  const [previewSource, setPreviewSource] = useState('url')
 
   const { mutate: fetchPreview, error: previewError }                    = usePreview()
   const { mutate: subscribe,    isPending: isConfirming, error: subscribeError } = useSubscribe()
@@ -127,6 +138,7 @@ export default function TrackPageClient() {
         <UrlInputForm
           onSubmitUrl={(url) => {
             setInitialUrl('')
+            setPreviewSource('url')
             setTrackStep('loading')
             fetchPreview(url)
           }}
@@ -261,6 +273,7 @@ export default function TrackPageClient() {
       <div className="mx-auto max-w-xl">
         <ScrapeFailureCard
           onSelectUrl={(url) => {
+            setPreviewSource('search')
             setTrackStep('loading')
             fetchPreview(url)
           }}
@@ -278,8 +291,9 @@ export default function TrackPageClient() {
         <SearchResultsCard
           query={searchQuery}
           results={searchResults}
-          onBack={resetTrack}
+          onBack={() => { setInitialQuery(''); resetTrack() }}
           onSelectUrl={(url) => {
+            setPreviewSource('search')
             setTrackStep('loading')
             fetchPreview(url)
           }}
@@ -295,7 +309,16 @@ export default function TrackPageClient() {
         <PreviewCard
           previewResult={previewResult}
           onConfirm={(email) => { setTrackStep('confirming'); subscribe({ email }) }}
-          onBack={resetTrack}
+          onBack={() => {
+            setInitialQuery('')
+            setInitialUrl('')
+            resetTrack()
+          }}
+          onBackToResults={
+            previewSource === 'search' && searchResults.length > 0
+              ? () => setTrackStep('search_results')
+              : undefined
+          }
           isConfirming={trackStep === 'confirming' || isConfirming}
           error={subscribeError?.message}
         />

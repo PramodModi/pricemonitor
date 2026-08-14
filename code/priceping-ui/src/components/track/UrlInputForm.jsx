@@ -120,7 +120,7 @@ export default function UrlInputForm({
 }) {
   const [value, setValue] = useState(initialUrl || initialQuery)
   const [error, setError] = useState('')
-  const [selectedPlatform, setSelectedPlatform] = useState('all')
+  const [selectedPlatform, setSelectedPlatform] = useState('flipkart')
 
   const isBusy = isLoading || isSearching
 
