@@ -1,6 +1,7 @@
 import html
 import os
 import re
+import uuid
 from decimal import Decimal
 from typing import Optional
 
@@ -93,6 +94,7 @@ class EmailSender:
         new_price: Decimal,
         platform: str,
         mrp: Optional[Decimal] = None,
+        product_id: Optional[uuid.UUID] = None,
     ) -> bool:
         drop_amount, drop_pct = calculate_drop(old_price, new_price)
         drop_pct_int = round(drop_pct)
@@ -127,6 +129,15 @@ class EmailSender:
             mrp_row_html = ""
             mrp_row_txt = ""
 
+        # PricePing product page — shown alongside portal CTA so user can
+        # view price history chart without leaving PricePing ecosystem.
+        # Falls back to dashboard URL when product_id is not available.
+        if product_id:
+            base = settings.dashboard_url.replace("/dashboard", "")
+            priceping_url = f"{base}/products/{product_id}"
+        else:
+            priceping_url = settings.dashboard_url
+
         # Build HTML from template
         html_body = self._html_template
         for placeholder, value in {
@@ -141,6 +152,7 @@ class EmailSender:
             "{{product_url}}": product_url,
             "{{cta_text}}": cta_text,
             "{{prices_disclaimer}}": PRICES_DISCLAIMER,
+            "{{priceping_url}}": priceping_url,
             "{{dashboard_url}}": settings.dashboard_url,
         }.items():
             html_body = html_body.replace(placeholder, value)
@@ -157,6 +169,7 @@ class EmailSender:
             "{{drop_pct}}": str(drop_pct_int),
             "{{cta_text}}": cta_text,
             "{{product_url}}": product_url,
+            "{{priceping_url}}": priceping_url,
             "{{dashboard_url}}": settings.dashboard_url,
         }.items():
             plain_body = plain_body.replace(placeholder, value)
@@ -199,6 +212,7 @@ class EmailSender:
         product_url: str,
         current_price: Decimal,
         platform: str,
+        product_id: Optional[uuid.UUID] = None,
     ) -> bool:
         """Send a confirmation email when a user subscribes to a product."""
         platform_label = PLATFORM_LABEL.get(platform, platform.title())
@@ -212,6 +226,12 @@ class EmailSender:
         subject = f"Monitoring started: {name_short}"
 
         image_block = _build_image_tag(product_image_url, safe_name)
+
+        if product_id:
+            base = settings.dashboard_url.replace("/dashboard", "")
+            priceping_url = f"{base}/products/{product_id}"
+        else:
+            priceping_url = settings.dashboard_url
 
         html_body = f"""<!DOCTYPE html>
 <html lang="en">
@@ -240,6 +260,10 @@ class EmailSender:
       <a href="{product_url}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:11px 22px;border-radius:5px;font-size:14px;font-weight:bold;">View on {platform_label} &#8594;</a>
     </td></tr>
 
+    <tr><td style="padding-bottom:6px;">
+      <a href="{priceping_url}" style="font-size:13px;color:#6b7280;text-decoration:underline;">📊 View price history on PricePing</a>
+    </td></tr>
+
     <tr><td style="padding-bottom:28px;">
       <p style="margin:0;font-size:12px;color:#9ca3af;">Prices can change at any time.</p>
     </td></tr>
@@ -264,6 +288,7 @@ class EmailSender:
             f"Platform: {platform_label}\n\n"
             f"We'll email you when the price drops.\n\n"
             f"View the product:\n{product_url}\n\n"
+            f"View price history on PricePing:\n{priceping_url}\n\n"
             f"---\n"
             f"You requested price alerts from PricePing.\n"
             f"To stop monitoring, visit your dashboard:\n{settings.dashboard_url}\n"

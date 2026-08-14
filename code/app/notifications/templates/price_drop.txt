@@ -11,6 +11,9 @@ The price for an item you're monitoring has changed.
 {{cta_text}}:
 {{product_url}}
 
+View price history on PricePing:
+{{priceping_url}}
+
 ---
 You requested price alerts from PricePing.
 To stop monitoring, visit your dashboard:
