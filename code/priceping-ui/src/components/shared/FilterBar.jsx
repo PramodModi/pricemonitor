@@ -16,7 +16,9 @@ const PLATFORMS = [
 export const CATEGORIES = [
   { label: 'Mobiles',     value: 'mobiles' },
   { label: 'Electronics', value: 'electronics' },
+  { label: 'Appliances',  value: 'appliances' },
   { label: 'Fashion',     value: 'fashion' },
+  { label: 'Footwear',    value: 'footwear' },
   { label: 'Home',        value: 'home' },
   { label: 'Beauty',      value: 'beauty' },
   { label: 'Sports',      value: 'sports' },
@@ -24,6 +26,11 @@ export const CATEGORIES = [
   { label: 'Toys',        value: 'toys' },
   { label: 'Other',       value: 'other' },
 ]
+
+// Convert a category slug to a display label — 'appliances' → 'Appliances'
+function slugToLabel(slug) {
+  return slug.charAt(0).toUpperCase() + slug.slice(1)
+}
 
 /**
  * FilterBar — collapsible horizontal filter bar for platform + category.
@@ -59,12 +66,20 @@ export default function FilterBar({
   const activeCount = platforms.length + categories.length
   const hasFilters = activeCount > 0
 
+  // Category pills — driven by availableCategories from DB when provided.
+  // Falls back to hardcoded CATEGORIES only during initial load (null).
+  const categoryPills = availableCategories !== null
+    ? availableCategories
+        .filter(v => v && v !== 'other')
+        .map(value => ({ value, label: slugToLabel(value) }))
+    : CATEGORIES.filter(c => c.value !== 'other')
+
   // ── Active filter summary chips (shown in collapsed bar) ──────────────────
   const activePlatformLabels = PLATFORMS
     .filter(p => p.value && platforms.includes(p.value))
     .map(p => p.label)
 
-  const activeCategoryLabels = CATEGORIES
+  const activeCategoryLabels = categoryPills
     .filter(c => categories.includes(c.value))
     .map(c => c.label)
 
@@ -97,7 +112,7 @@ export default function FilterBar({
       onPlatforms(platforms.filter(p => p !== platform.value))
       return
     }
-    const category = CATEGORIES.find(c => c.label === label)
+    const category = categoryPills.find(c => c.label === label)
     if (category) {
       onCategories(categories.filter(c => c !== category.value))
     }
@@ -216,9 +231,7 @@ export default function FilterBar({
               Category
             </span>
             <div className="flex flex-wrap gap-2">
-              {CATEGORIES.filter(({ value }) =>
-                availableCategories === null || availableCategories.includes(value)
-              ).map(({ label, value }) => {
+              {categoryPills.map(({ label, value }) => {
                 const active = categories.includes(value)
                 return (
                   <button

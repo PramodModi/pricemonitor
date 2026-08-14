@@ -2,51 +2,52 @@ import { useQuery } from '@tanstack/react-query'
 import api from '@/lib/api'
 
 /**
- * Fetch products from the catalogue, ordered by watcher count descending.
- * Used by the /offers page.
+ * Fetch products from the catalogue, paginating backend automatically.
+ * Full list cached for 5 minutes — platform/category filtering is server-side.
  *
- * @param {string[]} platforms  - selected platforms e.g. ['amazon','flipkart'] (empty = all)
- * @param {string[]} categories - selected categories e.g. ['mobiles'] (empty = all)
+ * Backend caps at limit=100 per request — we loop with offset until exhausted.
  *
- * When multiple platforms or categories are selected, we make parallel API
- * calls (one per combination) and merge the results client-side.
- * The backend supports one platform + one category per request.
- *
- * @returns TanStack Query result — { data, isLoading, isError, refetch }
- *   data shape: { total, count, platform, items: ProductListItem[] }
+ * @param {string[]} platforms   - selected platforms (empty = all)
+ * @param {string[]} categories  - selected categories (empty = all)
+ * @param {boolean}  onlyDropped - when true, sends has_drop=true to backend
+ *                                 (only products where current_price < all_time_high)
  */
-export function useProducts(platforms = [], categories = []) {
-  // Build the list of (platform, category) pairs to fetch.
-  // Empty arrays mean "no filter" → one call with null values.
+const PAGE_SIZE = 100
+
+export function useProducts(platforms = [], categories = [], onlyDropped = false) {
+  // When multiple platforms/categories selected, make parallel calls per combo
   const platformList = platforms.length > 0 ? platforms : [null]
   const categoryList = categories.length > 0 ? categories : [null]
-
-  // Cartesian product — e.g. [amazon, flipkart] × [mobiles] → 2 calls
-  const pairs = platformList.flatMap(p =>
-    categoryList.map(c => ({ platform: p, category: c }))
-  )
+  const pairs = platformList.flatMap(p => categoryList.map(c => ({ platform: p, category: c })))
 
   return useQuery({
-    queryKey: ['products', platforms, categories],
+    queryKey: ['products', platforms, categories, onlyDropped],
     queryFn: async () => {
-      const results = await Promise.all(
+      // Fetch all pages for each (platform, category) pair in parallel
+      const allPairItems = await Promise.all(
         pairs.map(async ({ platform, category }) => {
-          const params = { limit: 50, offset: 0 }
-          if (platform) params.platform = platform
-          if (category) params.category = category
-          const res = await api.get('/v1/products', { params })
-          return res.data
+          const items = []
+          let offset = 0
+          while (true) {
+            const params = { limit: PAGE_SIZE, offset }
+            if (platform)    params.platform  = platform
+            if (category)    params.category  = category
+            if (onlyDropped) params.has_drop  = true
+            const res = await api.get('/v1/products', { params })
+            const batch = res.data.items ?? []
+            items.push(...batch)
+            if (batch.length < PAGE_SIZE) break
+            offset += PAGE_SIZE
+          }
+          return items
         })
       )
 
-      // Single call — return as-is
-      if (results.length === 1) return results[0]
-
-      // Multiple calls — merge and deduplicate by product_id
-      const seen = new Set()
+      // Merge and deduplicate across pairs
+      const seen  = new Set()
       const items = []
-      for (const result of results) {
-        for (const item of result.items ?? []) {
+      for (const pairItems of allPairItems) {
+        for (const item of pairItems) {
           if (!seen.has(item.product_id)) {
             seen.add(item.product_id)
             items.push(item)
@@ -54,16 +55,26 @@ export function useProducts(platforms = [], categories = []) {
         }
       }
 
-      // Re-sort by watcher_count desc (each batch was sorted, merge needs resort)
+      // Re-sort by watcher_count desc after merge
       items.sort((a, b) => (b.watcher_count ?? 0) - (a.watcher_count ?? 0))
 
-      return {
-        total: items.length,
-        count: items.length,
-        platform: platforms.length === 1 ? platforms[0] : null,
-        items,
-      }
+      return { total: items.length, items }
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+/**
+ * Fetch the full unfiltered catalogue count — used for subtitle
+ * ("X deals out of Y tracked products").
+ */
+export function useAllProductsCount() {
+  return useQuery({
+    queryKey: ['products', 'count'],
+    queryFn: async () => {
+      const res = await api.get('/v1/products', { params: { limit: 1, offset: 0 } })
+      return res.data.total ?? 0
+    },
+    staleTime: 5 * 60 * 1000,
   })
 }

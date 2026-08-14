@@ -28,6 +28,11 @@ class ItemOut(BaseModel):
     # Price drop since the previous scrape — None when insufficient history
     # or when price has not dropped. Computed in GET /v1/items, not stored.
     price_drop_pct: Optional[float] = None
+    # All-time low/high from price_history — flat on ItemOut (not on ProductOut)
+    # so dashboard cards can show the price history row without extra queries.
+    # Optional with None default — fully backward-compatible with Streamlit.
+    all_time_low:  Optional[float] = None
+    all_time_high: Optional[float] = None
 
     model_config = {"from_attributes": True}
 

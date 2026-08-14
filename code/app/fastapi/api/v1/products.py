@@ -834,21 +834,31 @@ def list_products(
             "Omit for all categories. Multiple values not supported — call once per category."
         ),
     ),
+    has_drop: bool = Query(
+        default=False,
+        description=(
+            "When true, only return products where current_price < all_time_high. "
+            "Used by the /offers page to show genuine price drops only."
+        ),
+    ),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> ProductListOut:
     """
-    Return all products in the catalogue ordered by watcher count descending.
+    Return products in the catalogue ordered by watcher count descending.
     No authentication required — public endpoint.
     Used by the /offers browsing page.
 
-    Supports optional filtering by platform and/or category.
+    Supports optional filtering by platform, category, and has_drop.
+    When has_drop=true, only products whose current price is below their
+    all-time high are returned (genuine price drops).
     """
     product_repo = ProductRepository(db)
     items_raw, total = product_repo.get_all(
         platform=platform,
         category=category,
+        has_drop=has_drop,
         limit=limit,
         offset=offset,
     )

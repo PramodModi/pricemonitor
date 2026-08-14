@@ -42,21 +42,22 @@ def get_items(
     if not subscriptions:
         return ItemsOut(email=email, count=0, items=[])
 
-    # ── Batch fetch all-time max prices — one query for all products ──────
-    # get_max_prices() returns MAX(price) from price_history per product.
+    # ── Batch fetch all-time low + max prices — one query for all products ─
+    # get_max_prices() returns MIN and MAX(price) from price_history per product.
     # Comparing against the all-time max correctly catches "price peaked
     # then dropped" — not just last-scrape fluctuations.
-    # 10% minimum threshold avoids badge noise on minor variations.
     product_ids = [sub.product.product_id for sub in subscriptions]
     product_repo = ProductRepository(db)
-    max_prices = product_repo.get_max_prices(product_ids)
+    price_stats = product_repo.get_max_prices(product_ids)
 
-    # ── Build items with price_drop_pct ───────────────────────────────────
+    # ── Build items with price_drop_pct + all_time_low/high ───────────────
     items = []
     for sub in subscriptions:
-        product = sub.product
-        current   = product.current_price
-        max_price = max_prices.get(product.product_id)
+        product  = sub.product
+        current  = product.current_price
+        stats    = price_stats.get(product.product_id, {})
+        min_price = stats.get("min_price")
+        max_price = stats.get("max_price")
 
         price_drop_pct = None
         if (max_price is not None
@@ -72,6 +73,8 @@ def get_items(
             subscribed_at=sub.created_at,
             product=ProductOut.model_validate(sub.product),
             price_drop_pct=price_drop_pct,
+            all_time_low=float(min_price) if min_price is not None else None,
+            all_time_high=float(max_price) if max_price is not None else None,
         ))
 
     return ItemsOut(email=email, count=len(items), items=items)

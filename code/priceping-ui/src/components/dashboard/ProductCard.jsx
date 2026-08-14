@@ -26,13 +26,14 @@ import {
  *   onRemove(subscriptionId) — called when trash icon is clicked
  */
 export default function ProductCard({ item, onRemove }) {
-  const { subscription_id, product, price_drop_pct } = item
+  const { subscription_id, product, price_drop_pct, all_time_low, all_time_high } = item
 
   const {
     product_id,
     name,
     image_url,
     platform,
+    category,
     availability,
     current_price,
     mrp,
@@ -48,10 +49,6 @@ export default function ProductCard({ item, onRemove }) {
   const mrpNum          = mrp           ? Number(mrp)           : null
   const specialPriceNum = special_price ? Number(special_price) : null
 
-  const hasDiscount  = mrpNum && mrpNum > currentPriceNum
-  const discountPct  = hasDiscount
-    ? Math.round(((mrpNum - currentPriceNum) / mrpNum) * 100)
-    : null
   const hasOfferPrice = specialPriceNum && specialPriceNum < currentPriceNum
 
   function handleCardClick(e) {
@@ -94,14 +91,17 @@ export default function ProductCard({ item, onRemove }) {
 
       {/* ── Content ───────────────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col gap-2 p-3">
-        {/* Availability */}
-        <span
-          className={`w-fit text-xs font-medium ${
-            availability ? 'badge-in-stock' : 'badge-out-of-stock'
-          }`}
-        >
-          {availability ? 'In Stock' : 'Out of Stock'}
-        </span>
+        {/* Availability + category */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={`w-fit text-xs font-medium ${availability ? 'badge-in-stock' : 'badge-out-of-stock'}`}>
+            {availability ? 'In Stock' : 'Out of Stock'}
+          </span>
+          {category && category !== 'other' && (
+            <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-500">
+              {category}
+            </span>
+          )}
+        </div>
 
         {/* Product name */}
         <p className="line-clamp-2 text-sm font-medium leading-snug text-slate-800 group-hover:text-indigo-600 transition-colors">
@@ -112,21 +112,45 @@ export default function ProductCard({ item, onRemove }) {
         <div className="space-y-0.5">
           <div className="flex flex-wrap items-baseline gap-2">
             <span className="price-large">{formatPrice(currentPriceNum)}</span>
-            {discountPct && (
-              <span className="price-drop-badge">{discountPct}% off</span>
-            )}
           </div>
-          {hasDiscount && (
-            <p className="text-xs text-slate-400">
-              MRP <span className="price-strike">{formatPrice(mrpNum)}</span>
-            </p>
-          )}
           {hasOfferPrice && (
             <p className="text-xs font-medium text-amber-700">
               Offer price: {formatPrice(specialPriceNum)}
             </p>
           )}
         </div>
+
+        {/* Price history row */}
+        {(() => {
+          const low  = all_time_low  ? Number(all_time_low)  : null
+          const high = all_time_high ? Number(all_time_high) : null
+          const allSame  = low !== null && high !== null && low === high && low === currentPriceNum
+          const isAtLow  = !allSame && low  !== null && currentPriceNum <= low
+          const isAtHigh = !allSame && high !== null && currentPriceNum >= high
+          const hasRange = low !== null && high !== null && low < high
+          return (
+            <div className="grid grid-cols-3 divide-x divide-slate-100 rounded-lg border border-slate-100 bg-slate-50 text-center text-[10px]">
+              <div className="px-1.5 py-1.5">
+                <p className={`font-semibold ${isAtLow ? 'text-green-700' : hasRange ? 'text-green-600' : 'text-slate-600'}`}>
+                  {low ? formatPrice(low) : formatPrice(currentPriceNum)}
+                </p>
+                <p className="text-slate-400 mt-0.5">All-time low</p>
+              </div>
+              <div className="px-1.5 py-1.5">
+                <p className={`font-semibold ${isAtLow ? 'text-green-700' : isAtHigh ? 'text-red-500' : 'text-slate-800'}`}>
+                  {formatPrice(currentPriceNum)}
+                </p>
+                <p className="text-slate-400 mt-0.5">Current</p>
+              </div>
+              <div className="px-1.5 py-1.5">
+                <p className={`font-semibold ${isAtHigh ? 'text-red-500' : 'text-slate-600'}`}>
+                  {high ? formatPrice(high) : formatPrice(currentPriceNum)}
+                </p>
+                <p className="text-slate-400 mt-0.5">All-time high</p>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Rating */}
         {rating && (

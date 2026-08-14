@@ -29,7 +29,7 @@ export default function ProductListCard({ product }) {
   const [toastMsg, setToastMsg]               = useState('')
 
   const {
-    product_id, name, image_url, url, platform,
+    product_id, name, image_url, url, platform, category,
     current_price, mrp, special_price, discount_pct,
     availability, rating, review_count,
     watcher_count, all_time_low, all_time_high,
@@ -116,7 +116,7 @@ export default function ProductListCard({ product }) {
 
   return (
     <div
-      className="card group relative flex cursor-pointer flex-col hover:shadow-md transition-shadow duration-200"
+      className="card group relative flex cursor-pointer flex-col hover:shadow-md transition-shadow duration-200 h-full"
       onClick={() => router.push(`/products/${product_id}`)}
     >
       {/* ── Toast ─────────────────────────────────────────────────────── */}
@@ -154,14 +154,21 @@ export default function ProductListCard({ product }) {
       </div>
 
       {/* ── Card content ──────────────────────────────────────────────── */}
-      <div className="flex flex-1 flex-col gap-2.5 p-4">
-        <span
-          className={`w-fit text-xs font-medium ${
-            availability ? 'badge-in-stock' : 'badge-out-of-stock'
-          }`}
-        >
-          {availability ? 'In Stock' : 'Out of Stock'}
-        </span>
+      <div className="flex flex-1 flex-col gap-2.5 p-4 min-h-[220px]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={`w-fit text-xs font-medium ${
+              availability ? 'badge-in-stock' : 'badge-out-of-stock'
+            }`}
+          >
+            {availability ? 'In Stock' : 'Out of Stock'}
+          </span>
+          {category && category !== 'other' && (
+            <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-500">
+              {category}
+            </span>
+          )}
+        </div>
 
         <p className="line-clamp-2 text-sm font-medium leading-snug text-slate-800">
           {name || 'Unnamed Product'}
@@ -172,21 +179,45 @@ export default function ProductListCard({ product }) {
             <span className="price-large">
               {currentPriceNum ? formatPrice(currentPriceNum) : '—'}
             </span>
-            {effectiveDiscountPct !== null && (
-              <span className="price-drop-badge">{effectiveDiscountPct}% off</span>
-            )}
           </div>
-          {hasDiscount && (
-            <p className="text-xs text-slate-400">
-              MRP <span className="price-strike">{formatPrice(mrpNum)}</span>
-            </p>
-          )}
           {showSpecialPrice && (
             <p className="text-xs font-medium text-indigo-600">
               With bank offer: {formatPrice(specialPriceNum)}
             </p>
           )}
         </div>
+
+        {/* ── Price history row — always shown for consistency ── */}
+        {(() => {
+          const low  = all_time_low  ? Number(all_time_low)  : null
+          const high = all_time_high ? Number(all_time_high) : null
+          const allSame  = low !== null && high !== null && low === high && low === currentPriceNum
+          // Only highlight when prices are meaningfully different
+          const isAtLow  = !allSame && low  !== null && currentPriceNum !== null && currentPriceNum <= low
+          const isAtHigh = !allSame && high !== null && currentPriceNum !== null && currentPriceNum >= high
+          return (
+            <div className="grid grid-cols-3 divide-x divide-slate-100 rounded-lg border border-slate-100 bg-slate-50 text-center text-[10px]">
+              <div className="px-1.5 py-1.5">
+                <p className={`font-semibold ${isAtLow ? 'text-green-700' : (low !== null && high !== null && low < high) ? 'text-green-600' : 'text-slate-600'}`}>
+                  {low ? formatPrice(low) : currentPriceNum ? formatPrice(currentPriceNum) : '—'}
+                </p>
+                <p className="text-slate-400 mt-0.5">All-time low</p>
+              </div>
+              <div className="px-1.5 py-1.5">
+                <p className={`font-semibold ${isAtLow ? 'text-green-700' : isAtHigh ? 'text-red-500' : 'text-slate-800'}`}>
+                  {currentPriceNum ? formatPrice(currentPriceNum) : '—'}
+                </p>
+                <p className="text-slate-400 mt-0.5">Current</p>
+              </div>
+              <div className="px-1.5 py-1.5">
+                <p className={`font-semibold ${isAtHigh ? 'text-red-500' : 'text-slate-600'}`}>
+                  {high ? formatPrice(high) : currentPriceNum ? formatPrice(currentPriceNum) : '—'}
+                </p>
+                <p className="text-slate-400 mt-0.5">All-time high</p>
+              </div>
+            </div>
+          )
+        })()}
 
         {rating && (
           <p className="text-xs text-slate-500">

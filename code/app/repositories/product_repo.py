@@ -251,6 +251,7 @@ class ProductRepository:
         self,
         platform: Optional[str] = None,
         category: Optional[str] = None,
+        has_drop: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
@@ -262,6 +263,8 @@ class ProductRepository:
         Args:
             platform: Optional platform filter ("amazon" | "flipkart" | "myntra").
             category: Optional unified category filter ("mobiles" | "electronics" | ...).
+            has_drop: When True, only return products where current_price < all_time_high
+                      (i.e. the price has dropped from its peak). Used by /offers page.
             limit:    Max rows to return (1–100).
             offset:   Pagination offset.
         """
@@ -325,12 +328,28 @@ class ProductRepository:
         if category:
             q = q.where(Product.category == category)
 
+        if has_drop:
+            # Only products where a price history exists and current < all-time high
+            q = q.where(
+                stats_sq.c.all_time_high.isnot(None),
+                Product.current_price.isnot(None),
+                Product.current_price < stats_sq.c.all_time_high,
+            )
+
         # ── Total count (without pagination) ──────────────────────────────
-        count_q = select(func.count(Product.product_id))
+        count_q = select(func.count(Product.product_id)).outerjoin(
+            stats_sq, Product.product_id == stats_sq.c.product_id
+        )
         if platform:
             count_q = count_q.where(Product.platform == platform)
         if category:
             count_q = count_q.where(Product.category == category)
+        if has_drop:
+            count_q = count_q.where(
+                stats_sq.c.all_time_high.isnot(None),
+                Product.current_price.isnot(None),
+                Product.current_price < stats_sq.c.all_time_high,
+            )
         total = self.db.scalar(count_q) or 0
 
         # ── Paginated results ──────────────────────────────────────────────
@@ -348,16 +367,15 @@ class ProductRepository:
     def get_max_prices(
         self,
         product_ids: list[uuid.UUID],
-    ) -> dict[uuid.UUID, "Decimal"]:
+    ) -> dict[uuid.UUID, dict]:
         """
-        Return the all-time maximum successful price for each product_id
+        Return all-time min and max successful price for each product_id
         in a single batch query — no N+1.
 
-        Used by GET /v1/items to compute price_drop_pct on dashboard cards.
-        Comparing current_price against the all-time max correctly surfaces
-        "price peaked then dropped" situations (not just last-scrape changes).
+        Used by GET /v1/items to compute price_drop_pct and supply
+        all_time_low / all_time_high for the dashboard price history row.
 
-        Returns: {product_id: max_price}
+        Returns: {product_id: {"min_price": Decimal, "max_price": Decimal}}
         Products with no successful price history are absent from the dict.
         """
         if not product_ids:
@@ -366,6 +384,7 @@ class ProductRepository:
         rows = self.db.execute(
             select(
                 PriceHistory.product_id,
+                func.min(PriceHistory.price).label("min_price"),
                 func.max(PriceHistory.price).label("max_price"),
             )
             .where(
@@ -376,7 +395,10 @@ class ProductRepository:
             .group_by(PriceHistory.product_id)
         ).all()
 
-        return {row.product_id: row.max_price for row in rows}
+        return {
+            row.product_id: {"min_price": row.min_price, "max_price": row.max_price}
+            for row in rows
+        }
 
     def delete(self, product: Product) -> None:
         self.db.delete(product)
