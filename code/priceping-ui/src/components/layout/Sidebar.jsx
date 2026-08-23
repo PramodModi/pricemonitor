@@ -12,6 +12,18 @@ const NAV_LINKS = [
   { href: '/track',     label: 'Track Item', icon: PlusCircle },
   { href: '/offers',    label: 'Offers',     icon: Tag },
   { href: '/profile',   label: 'Profile',    icon: User },
+  { href: 'https://clnk.in/BYvM',
+    label: 'Vijay Sales offers',
+    icon: User, 
+    target: '_blank',
+    rel: 'noopener noreferrer' 
+  },
+  { href: 'https://clnk.in/BYvW',
+    label: 'Reliance Digital offers',
+    icon: User, 
+    target: '_blank',
+    rel: 'noopener noreferrer'
+  },
 ]
 
 /**
