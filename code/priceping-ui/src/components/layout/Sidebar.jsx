@@ -24,6 +24,12 @@ const NAV_LINKS = [
     target: '_blank',
     rel: 'noopener noreferrer'
   },
+  { href: 'https://crma.clnk.in/BYw0',
+    label: 'Croma offers',
+    icon: User, 
+    target: '_blank',
+    rel: 'noopener noreferrer'
+  },
 ]
 
 /**
