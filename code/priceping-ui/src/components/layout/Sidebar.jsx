@@ -12,6 +12,13 @@ const NAV_LINKS = [
   { href: '/track',     label: 'Track Item', icon: PlusCircle },
   { href: '/offers',    label: 'Offers',     icon: Tag },
   { href: '/profile',   label: 'Profile',    icon: User },
+  
+  { href: 'https://link.amazon/B03xA93Nr',
+    label: 'Amazon offers',
+    icon: User, 
+    target: '_blank',
+    rel: 'noopener noreferrer' 
+  },
   { href: 'https://clnk.in/BYvg',
     label: 'Vijay Sales offers',
     icon: User, 
@@ -30,6 +37,19 @@ const NAV_LINKS = [
     target: '_blank',
     rel: 'noopener noreferrer'
   },
+  { href: 'https://clnk.in/BYUI',
+    label: 'Tata CliQ offers',
+    icon: User, 
+    target: '_blank',
+    rel: 'noopener noreferrer'
+  },
+  { href: 'https://clnk.in/BYUO',
+    label: 'pepperfry offers',
+    icon: User, 
+    target: '_blank',
+    rel: 'noopener noreferrer'
+  },
+  
 ]
 
 /**
