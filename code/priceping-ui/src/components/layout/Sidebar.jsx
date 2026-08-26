@@ -49,6 +49,18 @@ const NAV_LINKS = [
     target: '_blank',
     rel: 'noopener noreferrer'
   },
+  { href: 'https://www.meesho.com/',
+    label: 'Meesho offers',
+    icon: User, 
+    target: '_blank',
+    rel: 'noopener noreferrer'
+  },
+   { href: 'https://www.myntra.com/',
+    label: 'Myntra offers',
+    icon: User, 
+    target: '_blank',
+    rel: 'noopener noreferrer'
+  },
   
 ]
 
